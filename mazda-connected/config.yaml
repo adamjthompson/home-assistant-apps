@@ -1,7 +1,7 @@
 name: "Mazda Connected Services"
 description: "Local API server for Mazda Connected Services via node-mymazda"
 version: "1.0.0"
-slug: "mazda_connected"
+slug: "mazda-connected"
 init: false
 arch:
   - aarch64
