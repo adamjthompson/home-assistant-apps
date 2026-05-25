@@ -1,8 +1,5 @@
 ARG BUILD_FROM
-FROM ${BUILD_FROM}
-
-# Install Node.js 18
-RUN apk add --no-cache nodejs npm
+FROM node:18-alpine
 
 # Set working directory
 WORKDIR /app
