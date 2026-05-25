@@ -1,13 +1,13 @@
-# Litter Robot Proxy — Home Assistant App Repository
+# Home Assistant App Repository
 
-Custom Home Assistant repository for the Litter Robot Proxy app.
+Custom Home Assistant repository for my custom apps.
 
 ## Installation
 
 1. In Home Assistant, go to **Settings → Apps → Install App**
 2. Click the **⋮** menu → **Repositories**
-3. Add this repository URL: https://github.com/adamjthompson/litter-robot-proxy-app
-4. Find **Litter Robot Proxy** in the store and click **Install**
+3. Add this repository URL: https://github.com/adamjthompson/home-assistant-apps
+4. Find the desired app in the store and click **Install**
 
 ## Apps included
 
