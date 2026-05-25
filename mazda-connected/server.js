@@ -1,6 +1,8 @@
 const express = require("express");
 const MazdaClient = require("node-mymazda").default;
 const fs = require("fs");
+const dns = require("dns");
+dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
 app.use(express.json());
