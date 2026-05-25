@@ -36,7 +36,7 @@ The final structure should look like the tree above.
 HA requires custom add-ons to be in a Git repo (GitHub public or private works).
 
 1. Create a repo on GitHub (e.g. `ha-addons`)
-2. Inside it, create a folder called `mazda_connected`
+2. Inside it, create a folder called `mazda-connected`
 3. Copy all files from this add-on into that folder, including `node-mymazda/`
 4. Commit and push
 
@@ -44,7 +44,7 @@ HA requires custom add-ons to be in a Git repo (GitHub public or private works).
 
 1. In HA, go to **Settings → Add-ons → Add-on Store**
 2. Click the **⋮ menu** (top right) → **Repositories**
-3. Paste your repo URL (e.g. `https://github.com/yourname/ha-addons`)
+3. Paste your repo URL (e.g. `https://github.com/adamjthompson/home-assistant-apps`)
 4. Click **Add**
 
 ### Step 4 — Install the add-on
