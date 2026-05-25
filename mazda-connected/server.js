@@ -220,7 +220,7 @@ app.post("/unlock", async (req, res) => {
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
-const PORT = 3000;
+const PORT = 3001;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Mazda API server listening on port ${PORT}`);
   console.log(`Polling every ${poll_interval_minutes} minute(s)`);
