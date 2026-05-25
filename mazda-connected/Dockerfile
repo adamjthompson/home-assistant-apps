@@ -9,7 +9,7 @@ COPY package.json ./
 COPY node-mymazda/ ./node-mymazda/
 
 # Install dependencies (node-mymazda resolved from local path)
-RUN npm install
+RUN npm install --ignore-scripts
 
 # Copy application files
 COPY server.js ./
