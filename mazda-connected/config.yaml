@@ -1,0 +1,30 @@
+name: "Mazda Connected Services"
+description: "Local API server for Mazda Connected Services via node-mymazda"
+version: "1.0.0"
+slug: "mazda_connected"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: "Mazda API server"
+options:
+  email: ""
+  password: ""
+  region: "MNAO"
+  poll_interval_minutes: 5
+schema:
+  email: str
+  password: str
+  region: list(MNAO|MME|MJO)
+  poll_interval_minutes: int(1,60)
+map:
+  - config:rw
+homeassistant_api: false
+ingress: false
+panel_icon: mdi:car

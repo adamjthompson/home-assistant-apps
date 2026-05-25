@@ -1,0 +1,13 @@
+{
+  "name": "mazda-ha-addon",
+  "version": "1.0.0",
+  "description": "Home Assistant add-on API server for Mazda Connected Services",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-mymazda": "file:./node-mymazda"
+  }
+}
