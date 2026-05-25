@@ -7,7 +7,7 @@ fingerprinting issue that affects pymazda on HAOS.
 ## File Structure
 
 ```
-mazda_connected/
+mazda-connected/
 ├── config.yaml            # HA add-on manifest
 ├── build.yaml             # Docker base image config
 ├── Dockerfile             # Container build instructions
@@ -22,7 +22,7 @@ mazda_connected/
 
 > **Important:** node-mymazda is no longer available on the npm registry due to
 > the Mazda DMCA situation. Your local copy of node-mymazda must be placed in
-> the `mazda_connected/node-mymazda/` folder before committing to GitHub.
+> the `mazda-connected/node-mymazda/` folder before committing to GitHub.
 
 ## Installation
 
