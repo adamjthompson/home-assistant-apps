@@ -1,5 +1,5 @@
 const express = require("express");
-const MazdaClient = require("node-mymazda");
+const MazdaClient = require("node-mymazda").default;
 const fs = require("fs");
 
 const app = express();
