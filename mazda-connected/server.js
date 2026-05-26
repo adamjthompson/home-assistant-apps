@@ -140,12 +140,13 @@ async function getMazdaClient() {
   const MazdaClient = require("node-mymazda").default;
   const client = new MazdaClient(email, password, region);
 
-  // Override the internal connection's login method to use our new auth
-  client.connection.login = async () => {
-    client.connection.accessToken = await authClient.getAccessToken();
-  };
-  client.connection.getAccessToken = async () => {
-    return authClient.getAccessToken();
+  // Override the login method on the connection with our new Azure B2C auth
+  client.controller.connection.login = async () => {
+    const tokens = await authClient.getAccessToken();
+    client.controller.connection.accessToken = tokens;
+    // Set expiry to 110 minutes from now (tokens last 2 hours)
+    client.controller.connection.accessTokenExpirationTs = 
+      Math.floor(Date.now() / 1000) + 6600;
   };
 
   return client;
