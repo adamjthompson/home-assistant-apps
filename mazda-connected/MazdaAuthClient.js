@@ -110,15 +110,19 @@ function httpsGet(reqUrl, headers = {}, followRedirects = true, cookieJar = {}) 
       res.on("data", chunk => body += chunk);
       res.on("end", () => {
         if (followRedirects && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          const next = res.headers.location.startsWith("http")
-            ? res.headers.location
-            : `https://${parsed.hostname}${res.headers.location}`;
-          // If redirect is to the custom scheme (msauth://), we've got the code
-          if (next.startsWith("msauth.")) {
-            resolve({ statusCode: res.statusCode, body, headers: res.headers, redirectUrl: next, cookieJar });
-          } else {
-            httpsGet(next, headers, true, cookieJar).then(resolve).catch(reject);
+          const location = res.headers.location;
+  
+          // Custom app scheme redirect — this contains our auth code
+          if (location.startsWith("msauth.")) {
+            resolve({ statusCode: res.statusCode, body, headers: res.headers, redirectUrl: location, cookieJar });
+            return;
           }
+        
+          const next = location.startsWith("http")
+            ? location
+            : `https://${parsed.hostname}${location}`;
+          
+          httpsGet(next, headers, true, cookieJar).then(resolve).catch(reject);
         } else {
           resolve({ statusCode: res.statusCode, body, headers: res.headers, cookieJar });
         }
