@@ -67,11 +67,11 @@ async function mazdaApiRequest(method, endpoint, body = null) {
   const headers = {
     "Authorization": `Bearer ${accessToken}`,
     "Content-Type":  "application/json; charset=utf-8",
-    "User-Agent":    "MyMazda-Android/8.1.1",
+    "User-Agent":    "MyMazda-Android/9.1.0",
     "appCode":       APP_CODE,
     "app-code":      APP_CODE,
     "appOs":         "Android",
-    "appVersion":    "8.1.1",
+    "appVersion":    "9.1.0",
     "region":        region,
     "locale":        "en-US",
     "timestamp":     timestamp,
@@ -125,7 +125,7 @@ async function getVehicles() {
   const resp = await mazdaApiRequest("POST", "/service/checkVersion");
   // Use node-mymazda's client for vehicle/status calls — it just needs the token injected
   // For now call the vehicle list endpoint directly
-  const MazdaClient = require("node-mymazda").default;
+  const MazdaClient = require("./node-mymazda").default;
 
   // Monkey-patch: override the connection's getAccessToken with ours
   const client = new MazdaClient(email, password, region);
@@ -137,7 +137,7 @@ async function getVehicles() {
 
 // Simpler approach: use node-mymazda directly but intercept its login
 async function getMazdaClient() {
-  const MazdaClient = require("node-mymazda").default;
+  const MazdaClient = require("./node-mymazda").default;
   const client = new MazdaClient(email, password, region);
 
   // Override the login method on the connection with our new Azure B2C auth
