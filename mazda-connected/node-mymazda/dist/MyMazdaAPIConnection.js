@@ -8,10 +8,11 @@ const log4js_1 = __importDefault(require("log4js"));
 const CryptoUtils_1 = __importDefault(require("./CryptoUtils"));
 const SensorDataBuilder_1 = __importDefault(require("./sensordata/SensorDataBuilder"));
 
+// Updated with the iOS app codes from your Charles Proxy trace
 const REGION_CONFIG = {
     "MNAO": {
-        appCode: "202007270941270111799",
-        remoteAppCode: "635529297359258474866",
+        appCode: "202007270939497603795",       // iOS Base App Code
+        remoteAppCode: "635529297359258474866", // iOS Remote App Code
         baseUrl: "https://0cxo7m58.mazda.com/prod/",
         remoteUrl: "https://hgs2ivna.mazda.com/",
         usherUrl: "https://ptznwbh8.mazda.com/appapi/v1/"
@@ -34,10 +35,12 @@ const REGION_CONFIG = {
 
 const IV = "0102030405060708";
 const SIGNATURE_MD5 = "C383D8C4D279B78130AD52DC71D95CAA";
-const APP_PACKAGE_ID = "com.interrait.mymazda";
-const USER_AGENT_BASE_API = "MyMazda-Android/9.1.0";
-const USER_AGENT_USHER_API = "MyMazda/9.1.0 (Google Pixel 3a; Android 11)";
-const APP_OS = "Android";
+
+// Fully switch emulation from Android to iOS
+const APP_PACKAGE_ID = "com.mazdausa.mazdaiphone";
+const USER_AGENT_BASE_API = "MyMazda-ios/9.1.0";
+const USER_AGENT_USHER_API = "MyMazda/9.1.0 (iPhone; iOS 17.0)";
+const APP_OS = "IOS";
 const APP_VERSION = "9.1.0";
 const USHER_SDK_VERSION = "11.2.0400.001";
 const MAX_RETRIES = 4;
@@ -84,11 +87,12 @@ class MyMazdaAPIConnection {
         else {
             throw new Error("Invalid region");
         }
+        
         this.baseAPIDeviceID = CryptoUtils_1.default.generateUuidFromSeed(email);
         this.usherAPIDeviceID = CryptoUtils_1.default.generateUsherDeviceIDFromSeed(email);
         this.sensorDataBuilder = new SensorDataBuilder_1.default();
         
-        // Removed prefixUrl to allow dynamic routing
+        // Removed prefixUrl to allow dynamic routing and injected iOS headers
         this.gotClient = got_1.default.extend({
             headers: {
                 "device-id": this.baseAPIDeviceID,
@@ -96,7 +100,10 @@ class MyMazdaAPIConnection {
                 "user-agent": USER_AGENT_BASE_API,
                 "app-version": APP_VERSION,
                 "app-unique-id": APP_PACKAGE_ID,
-                "access-token": ""
+                "access-token": "",
+                "region": region === "MNAO" ? "us" : region === "MME" ? "eu" : "jp",
+                "locale": "en-US",
+                "language": "en"
             },
             responseType: "json",
             timeout: 10000,
@@ -119,6 +126,7 @@ class MyMazdaAPIConnection {
                         options.headers["req-id"] = `req_${timestamp}`;
                         options.headers["timestamp"] = timestamp;
                         options.headers["X-acf-sensor-data"] = this.sensorDataBuilder.generateSensorData();
+                        
                         if (options.url.href.includes("checkVersion")) {
                             options.headers["sign"] = this.getSignFromTimestamp(timestamp);
                         }
@@ -190,6 +198,8 @@ class MyMazdaAPIConnection {
     getTimestampStr() {
         return Math.round(Date.now() / 1000).toString();
     }
+    
+    // Encrypts logic using the base App Code (this is the key that generates the correct AES hash)
     getDecryptionKeyFromAppCode() {
         let val = CryptoUtils_1.default.md5(CryptoUtils_1.default.md5(this.appCode + APP_PACKAGE_ID).toUpperCase() + SIGNATURE_MD5).toLowerCase();
         return val.substring(4, 20);
@@ -251,13 +261,15 @@ class MyMazdaAPIConnection {
     async apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries) {
         if (numRetries > MAX_RETRIES)
             throw new Error(`Reached maximum number of retries for ${"method" in gotOptions ? gotOptions.method : "GET"} request to ${gotOptions.url}`);
+        
         if (needsKeys)
             await this.ensureKeysPresent();
         if (needsAuth)
             await this.ensureTokenIsValid();
+            
         logger.debug(`Sending ${"method" in gotOptions ? gotOptions.method : "GET"} request to ${gotOptions.url}${(numRetries > 0) ? ` - attempt #${numRetries + 1}` : ""}`);
         
-        // Dynamically route remoteServices requests to the new domain
+        // Dynamically route remoteServices requests to the new domain with the new app code
         let urlStr = gotOptions.url;
         let isRemoteService = typeof urlStr === "string" && urlStr.includes("remoteServices");
         
