@@ -18,7 +18,18 @@ class MyMazdaAPIClient {
             if (currentVehicleFlags.vinRegistStatus !== 3)
                 continue;
             let otherVehInfo = JSON.parse(currentVecBaseInfo.Vehicle.vehicleInformation);
-            let nickname = await this.controller.getNickName(currentVecBaseInfo.vin);
+            
+            // Wrap the notoriously buggy nickname endpoint to prevent E400002 crashes
+            let nickname = "Mazda";
+            try {
+                nickname = await this.controller.getNickName(currentVecBaseInfo.vin);
+            } catch (err) {
+                console.log(`[Warning] Could not fetch nickname for VIN ${currentVecBaseInfo.vin}. Using default fallback.`);
+                if (otherVehInfo.OtherInformation && otherVehInfo.OtherInformation.modelName) {
+                    nickname = otherVehInfo.OtherInformation.modelName;
+                }
+            }
+
             let vehicle = {
                 vin: currentVecBaseInfo.vin,
                 id: currentVecBaseInfo.Vehicle.CvInformation.internalVin,
@@ -160,4 +171,3 @@ class MyMazdaAPIClient {
     }
 }
 exports.default = MyMazdaAPIClient;
-//# sourceMappingURL=MyMazdaAPIClient.js.map

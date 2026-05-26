@@ -49,10 +49,8 @@ const https = require("https");
 const crypto = require("crypto");
 
 function encryptPayload(payload) {
-  // node-mymazda's encryption: AES-128-CBC with known IV and MD5-derived key
-  // We replicate it here so we don't need node-mymazda's connection module
   const IV  = Buffer.from("0102030405060708", "utf8");
-  const KEY_SOURCE = "C383D8C4D279B78130AD52DC71D95CAA"; // signatureMd5 from config.json
+  const KEY_SOURCE = "C383D8C4D279B78130AD52DC71D95CAA";
   const key = Buffer.from(KEY_SOURCE, "hex");
   const cipher = crypto.createCipheriv("aes-128-cbc", key.slice(0, 16), IV);
   let encrypted = cipher.update(JSON.stringify(payload), "utf8", "base64");
@@ -121,30 +119,13 @@ let cachedStatus   = {};
 let lastUpdated    = null;
 let updateInProgress = false;
 
-async function getVehicles() {
-  const resp = await mazdaApiRequest("POST", "/service/checkVersion");
-  // Use node-mymazda's client for vehicle/status calls — it just needs the token injected
-  // For now call the vehicle list endpoint directly
-  const MazdaClient = require("./node-mymazda").default;
-
-  // Monkey-patch: override the connection's getAccessToken with ours
-  const client = new MazdaClient(email, password, region);
-  // Replace the internal auth so it uses our token
-  client.connection.accessToken = await authClient.getAccessToken();
-  client.connection.getAccessToken = () => authClient.getAccessToken();
-  return client;
-}
-
-// Simpler approach: use node-mymazda directly but intercept its login
 async function getMazdaClient() {
   const MazdaClient = require("./node-mymazda").default;
   const client = new MazdaClient(email, password, region);
 
-  // Override the login method on the connection with our new Azure B2C auth
   client.controller.connection.login = async () => {
     const tokens = await authClient.getAccessToken();
     client.controller.connection.accessToken = tokens;
-    // Set expiry to 110 minutes from now (tokens last 2 hours)
     client.controller.connection.accessTokenExpirationTs = 
       Math.floor(Date.now() / 1000) + 6600;
   };
@@ -162,7 +143,19 @@ async function refreshData() {
 
     for (const v of vehicles) {
       try {
-        const status = await client.getVehicleStatus(v.id);
+        let status = await client.getVehicleStatus(v.id);
+        
+        // Ensure we fetch EV-specific data (battery, charging stats) for PHEVs
+        if (v.isElectric) {
+            try {
+                const evStatus = await client.getEVVehicleStatus(v.id);
+                status.chargeInfo = evStatus.chargeInfo;
+                status.hvacInfo = evStatus.hvacInfo;
+            } catch (evErr) {
+                console.error(`Failed to get EV status for vehicle ${v.id}:`, evErr.message);
+            }
+        }
+        
         cachedStatus[v.id] = status;
       } catch (err) {
         console.error(`Failed to get status for vehicle ${v.id}:`, err.message);
@@ -233,7 +226,7 @@ app.get("/sensors", (req, res) => {
     fuel_range_km:        s.fuelDistanceRemainingKm ?? null,
     odometer_miles:       km2mi(s.odometerKm),
     odometer_km:          s.odometerKm ?? null,
-    is_locked:            s.isLocked ?? null,
+    is_locked:            s.doorLocks ? (!s.doorLocks.driverDoorUnlocked && !s.doorLocks.passengerDoorUnlocked) : null,
     driver_door_open:     s.doors?.driverDoorOpen ?? null,
     passenger_door_open:  s.doors?.passengerDoorOpen ?? null,
     rear_left_door_open:  s.doors?.rearLeftDoorOpen ?? null,
@@ -246,6 +239,12 @@ app.get("/sensors", (req, res) => {
     tire_rr_psi:          s.tirePressure?.rearRightTirePressurePsi ?? null,
     latitude:             s.latitude ?? null,
     longitude:            s.longitude ?? null,
+    // EV / PHEV stats
+    battery_level_percent: s.chargeInfo?.batteryLevelPercentage ?? null,
+    battery_range_miles:   km2mi(s.chargeInfo?.drivingRangeKm),
+    battery_range_km:      s.chargeInfo?.drivingRangeKm ?? null,
+    plugged_in:            s.chargeInfo?.pluggedIn ?? null,
+    charging:              s.chargeInfo?.charging ?? null,
   });
 });
 
