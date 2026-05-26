@@ -7,33 +7,42 @@ const got_1 = __importDefault(require("got"));
 const log4js_1 = __importDefault(require("log4js"));
 const CryptoUtils_1 = __importDefault(require("./CryptoUtils"));
 const SensorDataBuilder_1 = __importDefault(require("./sensordata/SensorDataBuilder"));
+
 const REGION_CONFIG = {
     "MNAO": {
         appCode: "202007270941270111799",
+        remoteAppCode: "635529297359258474866",
         baseUrl: "https://0cxo7m58.mazda.com/prod/",
+        remoteUrl: "https://hgs2ivna.mazda.com/",
         usherUrl: "https://ptznwbh8.mazda.com/appapi/v1/"
     },
     "MME": {
         appCode: "202008100250281064816",
+        remoteAppCode: "202008100250281064816",
         baseUrl: "https://e9stj7g7.mazda.com/prod/",
+        remoteUrl: "https://e9stj7g7.mazda.com/prod/",
         usherUrl: "https://rz97suam.mazda.com/appapi/v1/"
     },
     "MJO": {
         appCode: "202009170613074283422",
+        remoteAppCode: "202009170613074283422",
         baseUrl: "https://wcs9p6wj.mazda.com/prod/",
+        remoteUrl: "https://wcs9p6wj.mazda.com/prod/",
         usherUrl: "https://c5ulfwxr.mazda.com/appapi/v1/"
     }
 };
+
 const IV = "0102030405060708";
 const SIGNATURE_MD5 = "C383D8C4D279B78130AD52DC71D95CAA";
 const APP_PACKAGE_ID = "com.interrait.mymazda";
-const USER_AGENT_BASE_API = "MyMazda-Android/9.1.1";
-const USER_AGENT_USHER_API = "MyMazda/9.1.1 (Google Pixel 3a; Android 11)";
+const USER_AGENT_BASE_API = "MyMazda-Android/9.1.0";
+const USER_AGENT_USHER_API = "MyMazda/9.1.0 (Google Pixel 3a; Android 11)";
 const APP_OS = "Android";
-const APP_VERSION = "9.1.1";
+const APP_VERSION = "9.1.0";
 const USHER_SDK_VERSION = "11.2.0400.001";
 const MAX_RETRIES = 4;
 const logger = log4js_1.default.getLogger();
+
 function isSuccessfulEncryptedAPIResponse(responseBody) {
     return (responseBody?.state === "S");
 }
@@ -59,6 +68,7 @@ function isURLSearchParams(obj) {
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+
 class MyMazdaAPIConnection {
     constructor(email, password, region) {
         this.email = email;
@@ -66,7 +76,9 @@ class MyMazdaAPIConnection {
         if (region in REGION_CONFIG) {
             let regionConfig = REGION_CONFIG[region];
             this.appCode = regionConfig.appCode;
+            this.remoteAppCode = regionConfig.remoteAppCode;
             this.baseUrl = regionConfig.baseUrl;
+            this.remoteUrl = regionConfig.remoteUrl;
             this.usherUrl = regionConfig.usherUrl;
         }
         else {
@@ -75,11 +87,11 @@ class MyMazdaAPIConnection {
         this.baseAPIDeviceID = CryptoUtils_1.default.generateUuidFromSeed(email);
         this.usherAPIDeviceID = CryptoUtils_1.default.generateUsherDeviceIDFromSeed(email);
         this.sensorDataBuilder = new SensorDataBuilder_1.default();
+        
+        // Removed prefixUrl to allow dynamic routing
         this.gotClient = got_1.default.extend({
-            prefixUrl: this.baseUrl,
             headers: {
                 "device-id": this.baseAPIDeviceID,
-                "app-code": this.appCode,
                 "app-os": APP_OS,
                 "user-agent": USER_AGENT_BASE_API,
                 "app-version": APP_VERSION,
@@ -171,6 +183,7 @@ class MyMazdaAPIConnection {
             },
         });
     }
+
     getTimestampStrMs() {
         return Date.now().toString();
     }
@@ -230,9 +243,11 @@ class MyMazdaAPIConnection {
         let result = JSON.parse(decrypted);
         return result;
     }
+
     async apiRequest(needsKeys, needsAuth, gotOptions) {
         return await this.apiRequestRetry(needsKeys, needsAuth, gotOptions, 0);
     }
+
     async apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries) {
         if (numRetries > MAX_RETRIES)
             throw new Error(`Reached maximum number of retries for ${"method" in gotOptions ? gotOptions.method : "GET"} request to ${gotOptions.url}`);
@@ -241,7 +256,32 @@ class MyMazdaAPIConnection {
         if (needsAuth)
             await this.ensureTokenIsValid();
         logger.debug(`Sending ${"method" in gotOptions ? gotOptions.method : "GET"} request to ${gotOptions.url}${(numRetries > 0) ? ` - attempt #${numRetries + 1}` : ""}`);
-        let gotOptionsWithToken = { ...gotOptions, headers: { ...gotOptions.headers, "access-token": needsAuth ? this.accessToken : undefined } };
+        
+        // Dynamically route remoteServices requests to the new domain
+        let urlStr = gotOptions.url;
+        let isRemoteService = typeof urlStr === "string" && urlStr.includes("remoteServices");
+        
+        let targetBaseUrl = isRemoteService ? this.remoteUrl : this.baseUrl;
+        let targetAppCode = isRemoteService ? this.remoteAppCode : this.appCode;
+
+        // Force an absolute URL so we can seamlessly route traffic to different hosts
+        let absoluteUrl = targetBaseUrl + urlStr;
+
+        let gotOptionsWithToken = { 
+            ...gotOptions, 
+            url: absoluteUrl,
+            headers: { 
+                ...gotOptions.headers, 
+                "app-code": targetAppCode,
+                "access-token": needsAuth ? this.accessToken : undefined 
+            } 
+        };
+
+        // Inject the required standard Bearer token for the new endpoints
+        if (needsAuth && isRemoteService) {
+            gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
+        }
+
         try {
             let response = await this.gotClient(gotOptionsWithToken);
             return response.body;
@@ -272,6 +312,7 @@ class MyMazdaAPIConnection {
             }
         }
     }
+
     async ensureKeysPresent() {
         if (typeof this.encKey === "undefined" || typeof this.signKey === "undefined") {
             await this.retrieveKeys();
@@ -296,6 +337,7 @@ class MyMazdaAPIConnection {
         this.encKey = responseObj.encKey;
         this.signKey = responseObj.signKey;
     }
+
     async login() {
         logger.debug(`Logging in as ${this.email}`);
         logger.debug("Retrieving public key to encrypt password");
