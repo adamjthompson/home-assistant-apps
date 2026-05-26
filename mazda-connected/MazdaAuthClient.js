@@ -6,11 +6,11 @@
  * ptznwbh8.mazda.com usher endpoint.
  *
  * Flow:
- *   1. GET /authorize  → extract CSRF token + state + tx params
- *   2. POST to SelfAsserted with email + password + CSRF token
- *   3. GET /confirmed  → follow redirect to extract auth code
- *   4. POST to /token  → exchange code + code_verifier for tokens
- *   5. Cache tokens; use refresh_token to silently renew every 2 hours
+ * 1. GET /authorize  → extract CSRF token + state + tx params
+ * 2. POST to SelfAsserted with email + password + CSRF token
+ * 3. GET /confirmed  → follow redirect to extract auth code
+ * 4. POST to /token  → exchange code + code_verifier for tokens
+ * 5. Cache tokens; use refresh_token to silently renew every 2 hours
  */
 
 const crypto = require("crypto");
@@ -33,7 +33,7 @@ const AUTHORIZE_URL = `${AUTH_BASE}/oauth2/v2.0/authorize`;
 // App headers observed in Charles traffic
 const APP_HEADERS = {
   "x-app-name":    "MyMazda",
-  "x-app-ver":     "9.1.0",
+  "x-app-ver":     "9.1.1",
   "x-client-OS":   "26.4.2",
   "x-client-DM":   "iPhone",
   "x-client-SKU":  "MSAL.iOS",
@@ -206,7 +206,7 @@ async function performLogin(email, password) {
     "phone_number_min_length":  "10",
     "response_type":            "code",
     "code_challenge_method":    "S256",
-    "x-app-ver":                "9.1.0",
+    "x-app-ver":                "9.1.1",
     "redirect_uri":             REDIRECT_URI,
     "x-client-CPU":             "64",
     "haschrome":                "1",

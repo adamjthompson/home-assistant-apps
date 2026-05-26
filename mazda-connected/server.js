@@ -65,11 +65,11 @@ async function mazdaApiRequest(method, endpoint, body = null) {
   const headers = {
     "Authorization": `Bearer ${accessToken}`,
     "Content-Type":  "application/json; charset=utf-8",
-    "User-Agent":    "MyMazda-Android/9.1.0",
+    "User-Agent":    "MyMazda-Android/9.1.1",
     "appCode":       APP_CODE,
     "app-code":      APP_CODE,
     "appOs":         "Android",
-    "appVersion":    "9.1.0",
+    "appVersion":    "9.1.1",
     "region":        region,
     "locale":        "en-US",
     "timestamp":     timestamp,

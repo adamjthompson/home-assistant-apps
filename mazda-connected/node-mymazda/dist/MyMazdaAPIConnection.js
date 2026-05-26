@@ -27,10 +27,10 @@ const REGION_CONFIG = {
 const IV = "0102030405060708";
 const SIGNATURE_MD5 = "C383D8C4D279B78130AD52DC71D95CAA";
 const APP_PACKAGE_ID = "com.interrait.mymazda";
-const USER_AGENT_BASE_API = "MyMazda-Android/9.1.0";
-const USER_AGENT_USHER_API = "MyMazda/9.1.0 (Google Pixel 3a; Android 11)";
+const USER_AGENT_BASE_API = "MyMazda-Android/9.1.1";
+const USER_AGENT_USHER_API = "MyMazda/9.1.1 (Google Pixel 3a; Android 11)";
 const APP_OS = "Android";
-const APP_VERSION = "9.1.0";
+const APP_VERSION = "9.1.1";
 const USHER_SDK_VERSION = "11.2.0400.001";
 const MAX_RETRIES = 4;
 const logger = log4js_1.default.getLogger();
@@ -177,7 +177,6 @@ class MyMazdaAPIConnection {
     getTimestampStr() {
         return Math.round(Date.now() / 1000).toString();
     }
-    //a19e6e2de0e07d4a
     getDecryptionKeyFromAppCode() {
         let val = CryptoUtils_1.default.md5(CryptoUtils_1.default.md5(this.appCode + APP_PACKAGE_ID).toUpperCase() + SIGNATURE_MD5).toLowerCase();
         return val.substring(4, 20);
@@ -353,4 +352,3 @@ class MyMazdaAPIConnection {
     }
 }
 exports.default = MyMazdaAPIConnection;
-//# sourceMappingURL=MyMazdaAPIConnection.js.map
