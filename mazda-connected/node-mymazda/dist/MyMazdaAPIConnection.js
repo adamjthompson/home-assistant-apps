@@ -8,11 +8,11 @@ const log4js_1 = __importDefault(require("log4js"));
 const CryptoUtils_1 = __importDefault(require("./CryptoUtils"));
 const SensorDataBuilder_1 = __importDefault(require("./sensordata/SensorDataBuilder"));
 
-// Updated with the iOS app codes from your Charles Proxy trace
+// Store both the Base (Android) App Code for keys, and Remote (iOS) App Code for vehicle data
 const REGION_CONFIG = {
     "MNAO": {
-        appCode: "202007270939497603795",       // iOS Base App Code
-        remoteAppCode: "635529297359258474866", // iOS Remote App Code
+        appCode: "202007270941270111799",
+        remoteAppCode: "635529297359258474866", 
         baseUrl: "https://0cxo7m58.mazda.com/prod/",
         remoteUrl: "https://hgs2ivna.mazda.com/",
         usherUrl: "https://ptznwbh8.mazda.com/appapi/v1/"
@@ -36,11 +36,11 @@ const REGION_CONFIG = {
 const IV = "0102030405060708";
 const SIGNATURE_MD5 = "C383D8C4D279B78130AD52DC71D95CAA";
 
-// Fully switch emulation from Android to iOS
-const APP_PACKAGE_ID = "com.mazdausa.mazdaiphone";
-const USER_AGENT_BASE_API = "MyMazda-ios/9.1.0";
-const USER_AGENT_USHER_API = "MyMazda/9.1.0 (iPhone; iOS 17.0)";
-const APP_OS = "IOS";
+// Set base emulator to Android to ensure checkVersion signs correctly
+const APP_PACKAGE_ID = "com.interrait.mymazda";
+const USER_AGENT_BASE_API = "MyMazda-Android/9.1.0";
+const USER_AGENT_USHER_API = "MyMazda/9.1.0 (Google Pixel 3a; Android 11)";
+const APP_OS = "Android";
 const APP_VERSION = "9.1.0";
 const USHER_SDK_VERSION = "11.2.0400.001";
 const MAX_RETRIES = 4;
@@ -87,12 +87,11 @@ class MyMazdaAPIConnection {
         else {
             throw new Error("Invalid region");
         }
-        
         this.baseAPIDeviceID = CryptoUtils_1.default.generateUuidFromSeed(email);
         this.usherAPIDeviceID = CryptoUtils_1.default.generateUsherDeviceIDFromSeed(email);
         this.sensorDataBuilder = new SensorDataBuilder_1.default();
         
-        // Removed prefixUrl to allow dynamic routing and injected iOS headers
+        // Removed global prefixUrl to allow dynamic cross-domain routing
         this.gotClient = got_1.default.extend({
             headers: {
                 "device-id": this.baseAPIDeviceID,
@@ -126,7 +125,6 @@ class MyMazdaAPIConnection {
                         options.headers["req-id"] = `req_${timestamp}`;
                         options.headers["timestamp"] = timestamp;
                         options.headers["X-acf-sensor-data"] = this.sensorDataBuilder.generateSensorData();
-                        
                         if (options.url.href.includes("checkVersion")) {
                             options.headers["sign"] = this.getSignFromTimestamp(timestamp);
                         }
@@ -198,8 +196,6 @@ class MyMazdaAPIConnection {
     getTimestampStr() {
         return Math.round(Date.now() / 1000).toString();
     }
-    
-    // Encrypts logic using the base App Code (this is the key that generates the correct AES hash)
     getDecryptionKeyFromAppCode() {
         let val = CryptoUtils_1.default.md5(CryptoUtils_1.default.md5(this.appCode + APP_PACKAGE_ID).toUpperCase() + SIGNATURE_MD5).toLowerCase();
         return val.substring(4, 20);
@@ -269,14 +265,11 @@ class MyMazdaAPIConnection {
             
         logger.debug(`Sending ${"method" in gotOptions ? gotOptions.method : "GET"} request to ${gotOptions.url}${(numRetries > 0) ? ` - attempt #${numRetries + 1}` : ""}`);
         
-        // Dynamically route remoteServices requests to the new domain with the new app code
+        // Dynamically identify if this request belongs to the new remoteServices domain
         let urlStr = gotOptions.url;
         let isRemoteService = typeof urlStr === "string" && urlStr.includes("remoteServices");
         
         let targetBaseUrl = isRemoteService ? this.remoteUrl : this.baseUrl;
-        let targetAppCode = isRemoteService ? this.remoteAppCode : this.appCode;
-
-        // Force an absolute URL so we can seamlessly route traffic to different hosts
         let absoluteUrl = targetBaseUrl + urlStr;
 
         let gotOptionsWithToken = { 
@@ -284,14 +277,22 @@ class MyMazdaAPIConnection {
             url: absoluteUrl,
             headers: { 
                 ...gotOptions.headers, 
-                "app-code": targetAppCode,
                 "access-token": needsAuth ? this.accessToken : undefined 
             } 
         };
 
-        // Inject the required standard Bearer token for the new endpoints
-        if (needsAuth && isRemoteService) {
-            gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
+        // HYBRID SWAP: If routing to hgs2ivna, transform the request headers to match an iPhone
+        if (isRemoteService) {
+            gotOptionsWithToken.headers["app-code"] = this.remoteAppCode;
+            gotOptionsWithToken.headers["app-os"] = "IOS";
+            gotOptionsWithToken.headers["app-unique-id"] = "com.mazdausa.mazdaiphone";
+            gotOptionsWithToken.headers["user-agent"] = "MyMazda-ios/9.1.0";
+            if (needsAuth) {
+                gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
+            }
+        } else {
+            // Otherwise, stay as Android
+            gotOptionsWithToken.headers["app-code"] = this.appCode;
         }
 
         try {
