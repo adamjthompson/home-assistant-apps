@@ -335,20 +335,71 @@ class MyMazdaAPIConnection {
 
     async retrieveKeys() {
         logger.debug("Retrieving standard encryption keys");
-        let responseObj = await this.apiRequest(false, false, { url: "service/checkVersion", method: "POST" });
+        // We force this request to use the base domain, avoiding the isRemote logic
+        let responseObj = await this.gotClient({
+            url: this.baseUrl + "service/checkVersion",
+            method: "POST",
+            headers: { "app-code": this.appCode }
+        }).json();
+        
+        // Ensure we got the keys back
+        if (!responseObj.encKey || !responseObj.signKey) {
+            throw new Error("Failed to retrieve encryption keys from Mazda API");
+        }
+        
         this.encKey = responseObj.encKey;
         this.signKey = responseObj.signKey;
+        logger.debug("Successfully retrieved encryption keys");
     }
 
-    async retrieveRemoteKeys() {
-        logger.debug("Retrieving remote encryption keys");
-        let responseObj = await this.apiRequest(false, false, { 
-            url: "remoteServices/getVecBaseInfos/v4", 
-            method: "POST",
-            json: { "internaluserid": "__INTERNAL_ID__" } 
-        });
-        this.remoteEncKey = responseObj.encKey;
-        this.remoteSignKey = responseObj.signKey;
+    async apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries) {
+        if (numRetries > MAX_RETRIES) throw new Error("Max retries reached");
+        
+        // 1. Ensure keys exist before doing anything
+        if (needsKeys && !this.encKey) await this.retrieveKeys();
+        if (needsAuth) await this.ensureTokenIsValid();
+
+        let urlStr = gotOptions.url;
+        let isRemoteService = typeof urlStr === "string" && urlStr.includes("remoteServices");
+        
+        // 2. Route domain and set Headers based on destination
+        let targetBaseUrl = isRemoteService ? this.remoteUrl : this.baseUrl;
+        let absoluteUrl = targetBaseUrl + urlStr;
+
+        let gotOptionsWithToken = { 
+            ...gotOptions, 
+            url: absoluteUrl,
+            headers: { 
+                ...gotOptions.headers, 
+                "access-token": needsAuth ? this.accessToken : undefined 
+            } 
+        };
+
+        if (isRemoteService) {
+            gotOptionsWithToken.headers["app-code"] = this.remoteAppCode;
+            gotOptionsWithToken.headers["app-os"] = "IOS";
+            gotOptionsWithToken.headers["app-unique-id"] = "com.mazdausa.mazdaiphone";
+            gotOptionsWithToken.headers["user-agent"] = "MyMazda-ios/9.1.0";
+            if (needsAuth) {
+                gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
+            }
+        } else {
+            gotOptionsWithToken.headers["app-code"] = this.appCode;
+        }
+
+        try {
+            let response = await this.gotClient(gotOptionsWithToken);
+            return response.body;
+        }
+        catch (err) {
+            console.error(`[API Debug] Error on ${gotOptions.url}: ${err.message}`);
+            
+            // Only retry if it's a generic failure, not if it's a hard encryption error
+            if (typeof err.message === "string" && err.message.includes("API_ENCRYPTION_ERROR")) {
+                throw err; // Fail fast so we don't loop
+            }
+            throw err;
+        }
     }
 
     async login() {
