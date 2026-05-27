@@ -334,15 +334,13 @@ class MyMazdaAPIConnection {
     }
 
     async retrieveKeys() {
-        logger.debug("Retrieving standard encryption keys");
-        // We force this request to use the base domain, avoiding the isRemote logic
-        let responseObj = await this.gotClient({
-            url: this.baseUrl + "service/checkVersion",
-            method: "POST",
-            headers: { "app-code": this.appCode }
-        }).json();
+        logger.debug("Retrieving encryption keys");
+        // We ALWAYS retrieve keys from the main domain, regardless of the target service
+        let responseObj = await this.apiRequest(false, false, {
+            url: "service/checkVersion",
+            method: "POST"
+        });
         
-        // Ensure we got the keys back
         if (!responseObj.encKey || !responseObj.signKey) {
             throw new Error("Failed to retrieve encryption keys from Mazda API");
         }
@@ -355,14 +353,14 @@ class MyMazdaAPIConnection {
     async apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries) {
         if (numRetries > MAX_RETRIES) throw new Error("Max retries reached");
         
-        // 1. Ensure keys exist before doing anything
+        // 1. Ensure keys exist (always fetch from base domain)
         if (needsKeys && !this.encKey) await this.retrieveKeys();
         if (needsAuth) await this.ensureTokenIsValid();
-
+            
         let urlStr = gotOptions.url;
         let isRemoteService = typeof urlStr === "string" && urlStr.includes("remoteServices");
         
-        // 2. Route domain and set Headers based on destination
+        // 2. Set Domain and Headers based on destination
         let targetBaseUrl = isRemoteService ? this.remoteUrl : this.baseUrl;
         let absoluteUrl = targetBaseUrl + urlStr;
 
@@ -394,9 +392,10 @@ class MyMazdaAPIConnection {
         catch (err) {
             console.error(`[API Debug] Error on ${gotOptions.url}: ${err.message}`);
             
-            // Only retry if it's a generic failure, not if it's a hard encryption error
-            if (typeof err.message === "string" && err.message.includes("API_ENCRYPTION_ERROR")) {
-                throw err; // Fail fast so we don't loop
+            // Only retry if the session is invalid, not if the endpoint rejects it
+            if (typeof err.message === "string" && err.message.includes("ACCESS_TOKEN_EXPIRED_ERROR")) {
+                await this.login();
+                return await this.apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries + 1);
             }
             throw err;
         }
