@@ -10,10 +10,10 @@ const SensorDataBuilder_1 = __importDefault(require("./sensordata/SensorDataBuil
 
 const REGION_CONFIG = {
     "MNAO": {
-        appCode: "202007270941270111799",
-        baseUrl: "https://0cxo7m58.mazda.com/prod/",
-        remoteUrl: "https://hgs2ivna.mazda.com/",
-        usherUrl: "https://ptznwbh8.mazda.com/appapi/v1/"
+    appCode: "202007270939497603795",  // ← update this
+    baseUrl: "https://0cxo7m58.mazda.com/prod/",
+    remoteUrl: "https://hgs2ivna.mazda.com/",
+    usherUrl: "https://ptznwbh8.mazda.com/appapi/v1/"
     },
     "MME": {
         appCode: "202008100250281064816",
@@ -31,11 +31,11 @@ const REGION_CONFIG = {
 
 const IV = "0102030405060708";
 const SIGNATURE_MD5 = "C383D8C4D279B78130AD52DC71D95CAA";
-const APP_PACKAGE_ID = "com.interrait.mymazda";
-const USER_AGENT_BASE_API = "MyMazda-Android/9.1.1";
-const USER_AGENT_USHER_API = "MyMazda/9.1.1 (Google Pixel 3a; Android 11)";
-const APP_OS = "Android";
-const APP_VERSION = "9.1.1";
+const APP_PACKAGE_ID = "com.mazdausa.mazdaiphone";
+const USER_AGENT_BASE_API = "MyMazda-ios/9.1.0";
+const USER_AGENT_USHER_API = "MyMazda/9.1.0 (iPhone)";
+const APP_OS = "IOS";
+const APP_VERSION = "9.1.0";
 const USHER_SDK_VERSION = "11.2.0400.001";
 const MAX_RETRIES = 4;
 const logger = log4js_1.default.getLogger();
