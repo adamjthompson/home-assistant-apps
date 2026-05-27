@@ -10,9 +10,10 @@ const SensorDataBuilder_1 = __importDefault(require("./sensordata/SensorDataBuil
 
 const REGION_CONFIG = {
     "MNAO": {
-    appCode: "202007270939497603795",  // ← update this
+    appCode: "202007270939497603795",
     baseUrl: "https://0cxo7m58.mazda.com/prod/",
     remoteUrl: "https://hgs2ivna.mazda.com/",
+    remoteAppCode: "635529297359258474866",  // ← fix this
     usherUrl: "https://ptznwbh8.mazda.com/appapi/v1/"
     },
     "MME": {
@@ -75,12 +76,13 @@ class MyMazdaAPIConnection {
             this.appCode = regionConfig.appCode;
             this.baseUrl = regionConfig.baseUrl;
             this.remoteUrl = regionConfig.remoteUrl;
+            this.remoteAppCode = regionConfig.remoteAppCode;
             this.usherUrl = regionConfig.usherUrl;
         }
         else {
             throw new Error("Invalid region");
         }
-        this.baseAPIDeviceID = CryptoUtils_1.default.generateUuidFromSeed(email);
+        this.baseAPIDeviceID = CryptoUtils_1.default.sha256(email).substring(0, 40);
         this.usherAPIDeviceID = CryptoUtils_1.default.generateUsherDeviceIDFromSeed(email);
         this.sensorDataBuilder = new SensorDataBuilder_1.default();
         this.remoteEncKey = undefined;

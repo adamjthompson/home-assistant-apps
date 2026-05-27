@@ -23,7 +23,8 @@ const url = require("url");
 // ---------------------------------------------------------------------------
 const TENANT_ID   = "47801034-62d1-49f6-831b-ffdcf04f13fc";
 const CLIENT_ID   = "2daf581c-65c1-4fdb-b46a-efa98c6ba5b7";
-const POLICY      = "b2c_1a_signin";
+const POLICY       = "b2c_1a_signin";    // used in authorize URL
+const POLICY_UPPER = "B2C_1A_signin";    // used in SelfAsserted and confirmed URLs
 const REDIRECT_URI = "msauth.com.mazdausa.mazdaiphone://auth";
 const SCOPE       = "https://pduspb2c01.onmicrosoft.com/0728deea-be48-4382-9ef1-d4ff6d679ffa/cv openid profile offline_access";
 const AUTH_BASE   = `https://na.id.mazda.com/${TENANT_ID}/${POLICY}`;
@@ -244,7 +245,7 @@ async function performLogin(email, password) {
 
   console.log("[Auth] Step 2: POST credentials to SelfAsserted");
   const credResp = await httpsPost(
-    `https://na.id.mazda.com/${TENANT_ID}/${POLICY}/SelfAsserted?tx=${encodeURIComponent(tx)}&p=${POLICY}`,
+    `https://na.id.mazda.com/${TENANT_ID}/${POLICY_UPPER}/SelfAsserted?tx=${encodeURIComponent(tx)}&p=${POLICY}`,
     {
       request_type: "RESPONSE",
       signInName:   email,
