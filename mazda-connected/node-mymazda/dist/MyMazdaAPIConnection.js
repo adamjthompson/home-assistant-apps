@@ -83,6 +83,10 @@ class MyMazdaAPIConnection {
         this.baseAPIDeviceID = CryptoUtils_1.default.generateUuidFromSeed(email);
         this.usherAPIDeviceID = CryptoUtils_1.default.generateUsherDeviceIDFromSeed(email);
         this.sensorDataBuilder = new SensorDataBuilder_1.default();
+        this.remoteEncKey = undefined;
+        this.remoteSignKey = undefined; 
+        this.encKey = undefined;
+        this.signKey = undefined;
         
         // Removed global prefixUrl to allow dynamic cross-domain routing
         this.gotClient = got_1.default.extend({
@@ -249,17 +253,18 @@ class MyMazdaAPIConnection {
     }
 
     async apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries) {
-        if (numRetries > MAX_RETRIES)
-            throw new Error(`Reached maximum number of retries for ${"method" in gotOptions ? gotOptions.method : "GET"} request to ${gotOptions.url}`);
+        if (numRetries > MAX_RETRIES) throw new Error("Max retries reached");
         
-        if (needsKeys)
-            await this.ensureKeysPresent();
-        if (needsAuth)
-            await this.ensureTokenIsValid();
-            
         let urlStr = gotOptions.url;
         let isRemoteService = typeof urlStr === "string" && urlStr.includes("remoteServices");
         
+        if (needsKeys) await this.ensureKeysPresent(isRemoteService);
+        if (needsAuth) await this.ensureTokenIsValid();
+
+        // Assign keys based on domain
+        this.encKey = isRemoteService ? this.remoteEncKey : this.encKey;
+        this.signKey = isRemoteService ? this.remoteSignKey : this.signKey;
+
         let targetBaseUrl = isRemoteService ? this.remoteUrl : this.baseUrl;
         let absoluteUrl = targetBaseUrl + urlStr;
 
@@ -291,7 +296,6 @@ class MyMazdaAPIConnection {
         catch (err) {
             console.error(`[API Debug] Error on ${gotOptions.url}: ${err.message}`);
             
-            // CRITICAL FIX: Only allow automatic re-keying/login if we are NOT on the new domain
             if (!isRemoteService && typeof err.message === "string" && err.message.includes("API_ENCRYPTION_ERROR")) {
                 logger.debug("Server reports request was not encrypted properly. Retrieving new encryption keys.");
                 await this.retrieveKeys();
@@ -302,7 +306,6 @@ class MyMazdaAPIConnection {
                 return await this.apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries + 1);
             }
             else {
-                // If we are on the remote service domain, we fail fast instead of looping
                 throw err;
             }
         }
@@ -322,15 +325,30 @@ class MyMazdaAPIConnection {
             await this.login();
         }
     }
+    async ensureKeysPresent(isRemote) {
+        if (isRemote) {
+            if (typeof this.remoteEncKey === "undefined") await this.retrieveRemoteKeys();
+        } else {
+            if (typeof this.encKey === "undefined") await this.retrieveKeys();
+        }
+    }
+
     async retrieveKeys() {
-        logger.debug("Retrieving encryption keys");
-        let responseObj = await this.apiRequest(false, false, {
-            url: "service/checkVersion",
-            method: "POST"
-        });
-        logger.debug("Successfully retrieved encryption keys");
+        logger.debug("Retrieving standard encryption keys");
+        let responseObj = await this.apiRequest(false, false, { url: "service/checkVersion", method: "POST" });
         this.encKey = responseObj.encKey;
         this.signKey = responseObj.signKey;
+    }
+
+    async retrieveRemoteKeys() {
+        logger.debug("Retrieving remote encryption keys");
+        let responseObj = await this.apiRequest(false, false, { 
+            url: "remoteServices/getVecBaseInfos/v4", 
+            method: "POST",
+            json: { "internaluserid": "__INTERNAL_ID__" } 
+        });
+        this.remoteEncKey = responseObj.encKey;
+        this.remoteSignKey = responseObj.signKey;
     }
 
     async login() {
