@@ -8,25 +8,21 @@ const log4js_1 = __importDefault(require("log4js"));
 const CryptoUtils_1 = __importDefault(require("./CryptoUtils"));
 const SensorDataBuilder_1 = __importDefault(require("./sensordata/SensorDataBuilder"));
 
-// Store both the Base (Android) App Code for keys, and Remote (iOS) App Code for vehicle data
 const REGION_CONFIG = {
     "MNAO": {
         appCode: "202007270941270111799",
-        remoteAppCode: "635529297359258474866", 
         baseUrl: "https://0cxo7m58.mazda.com/prod/",
         remoteUrl: "https://hgs2ivna.mazda.com/",
         usherUrl: "https://ptznwbh8.mazda.com/appapi/v1/"
     },
     "MME": {
         appCode: "202008100250281064816",
-        remoteAppCode: "202008100250281064816",
         baseUrl: "https://e9stj7g7.mazda.com/prod/",
         remoteUrl: "https://e9stj7g7.mazda.com/prod/",
         usherUrl: "https://rz97suam.mazda.com/appapi/v1/"
     },
     "MJO": {
         appCode: "202009170613074283422",
-        remoteAppCode: "202009170613074283422",
         baseUrl: "https://wcs9p6wj.mazda.com/prod/",
         remoteUrl: "https://wcs9p6wj.mazda.com/prod/",
         usherUrl: "https://c5ulfwxr.mazda.com/appapi/v1/"
@@ -35,13 +31,11 @@ const REGION_CONFIG = {
 
 const IV = "0102030405060708";
 const SIGNATURE_MD5 = "C383D8C4D279B78130AD52DC71D95CAA";
-
-// Set base emulator to Android to ensure checkVersion signs correctly
 const APP_PACKAGE_ID = "com.interrait.mymazda";
-const USER_AGENT_BASE_API = "MyMazda-Android/9.1.0";
-const USER_AGENT_USHER_API = "MyMazda/9.1.0 (Google Pixel 3a; Android 11)";
+const USER_AGENT_BASE_API = "MyMazda-Android/9.1.1";
+const USER_AGENT_USHER_API = "MyMazda/9.1.1 (Google Pixel 3a; Android 11)";
 const APP_OS = "Android";
-const APP_VERSION = "9.1.0";
+const APP_VERSION = "9.1.1";
 const USHER_SDK_VERSION = "11.2.0400.001";
 const MAX_RETRIES = 4;
 const logger = log4js_1.default.getLogger();
@@ -79,7 +73,6 @@ class MyMazdaAPIConnection {
         if (region in REGION_CONFIG) {
             let regionConfig = REGION_CONFIG[region];
             this.appCode = regionConfig.appCode;
-            this.remoteAppCode = regionConfig.remoteAppCode;
             this.baseUrl = regionConfig.baseUrl;
             this.remoteUrl = regionConfig.remoteUrl;
             this.usherUrl = regionConfig.usherUrl;
@@ -95,6 +88,7 @@ class MyMazdaAPIConnection {
         this.gotClient = got_1.default.extend({
             headers: {
                 "device-id": this.baseAPIDeviceID,
+                "app-code": this.appCode,
                 "app-os": APP_OS,
                 "user-agent": USER_AGENT_BASE_API,
                 "app-version": APP_VERSION,
@@ -281,18 +275,9 @@ class MyMazdaAPIConnection {
             } 
         };
 
-        // HYBRID SWAP: If routing to hgs2ivna, transform the request headers to match an iPhone
-        if (isRemoteService) {
-            gotOptionsWithToken.headers["app-code"] = this.remoteAppCode;
-            gotOptionsWithToken.headers["app-os"] = "IOS";
-            gotOptionsWithToken.headers["app-unique-id"] = "com.mazdausa.mazdaiphone";
-            gotOptionsWithToken.headers["user-agent"] = "MyMazda-ios/9.1.0";
-            if (needsAuth) {
-                gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
-            }
-        } else {
-            // Otherwise, stay as Android
-            gotOptionsWithToken.headers["app-code"] = this.appCode;
+        // Inject the required standard Bearer token for the new endpoints
+        if (needsAuth && isRemoteService) {
+            gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
         }
 
         try {
@@ -300,6 +285,9 @@ class MyMazdaAPIConnection {
             return response.body;
         }
         catch (err) {
+            // Injecting a console error so we don't fly blind if Mazda throws another curveball
+            console.error(`[API Debug] Error on ${gotOptions.url}: ${err.message}`);
+            
             if (typeof err.message === "string" && err.message.includes("API_ENCRYPTION_ERROR")) {
                 logger.debug("Server reports request was not encrypted properly. Retrieving new encryption keys.");
                 await this.retrieveKeys();
