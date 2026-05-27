@@ -257,9 +257,6 @@ class MyMazdaAPIConnection {
         if (needsAuth)
             await this.ensureTokenIsValid();
             
-        logger.debug(`Sending ${"method" in gotOptions ? gotOptions.method : "GET"} request to ${gotOptions.url}${(numRetries > 0) ? ` - attempt #${numRetries + 1}` : ""}`);
-        
-        // Dynamically identify if this request belongs to the new remoteServices domain
         let urlStr = gotOptions.url;
         let isRemoteService = typeof urlStr === "string" && urlStr.includes("remoteServices");
         
@@ -275,9 +272,16 @@ class MyMazdaAPIConnection {
             } 
         };
 
-        // Inject the required standard Bearer token for the new endpoints
-        if (needsAuth && isRemoteService) {
-            gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
+        if (isRemoteService) {
+            gotOptionsWithToken.headers["app-code"] = this.remoteAppCode;
+            gotOptionsWithToken.headers["app-os"] = "IOS";
+            gotOptionsWithToken.headers["app-unique-id"] = "com.mazdausa.mazdaiphone";
+            gotOptionsWithToken.headers["user-agent"] = "MyMazda-ios/9.1.0";
+            if (needsAuth) {
+                gotOptionsWithToken.headers["Authorization"] = `Bearer ${this.accessToken}`;
+            }
+        } else {
+            gotOptionsWithToken.headers["app-code"] = this.appCode;
         }
 
         try {
@@ -285,30 +289,20 @@ class MyMazdaAPIConnection {
             return response.body;
         }
         catch (err) {
-            // Injecting a console error so we don't fly blind if Mazda throws another curveball
             console.error(`[API Debug] Error on ${gotOptions.url}: ${err.message}`);
             
-            if (typeof err.message === "string" && err.message.includes("API_ENCRYPTION_ERROR")) {
+            // CRITICAL FIX: Only allow automatic re-keying/login if we are NOT on the new domain
+            if (!isRemoteService && typeof err.message === "string" && err.message.includes("API_ENCRYPTION_ERROR")) {
                 logger.debug("Server reports request was not encrypted properly. Retrieving new encryption keys.");
                 await this.retrieveKeys();
                 return await this.apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries + 1);
             }
-            else if (typeof err.message === "string" && err.message.includes("ACCESS_TOKEN_EXPIRED_ERROR")) {
-                logger.debug("Server reports access token was expired. Retrieving new access token.");
+            else if (!isRemoteService && typeof err.message === "string" && err.message.includes("ACCESS_TOKEN_EXPIRED_ERROR")) {
                 await this.login();
-                return await this.apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries + 1);
-            }
-            else if (typeof err.message === "string" && err.message.includes("LOGIN_ERROR")) {
-                logger.debug("Login failed for an unknown reason. Trying again.");
-                await this.login();
-                return await this.apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries + 1);
-            }
-            else if (typeof err.message === "string" && err.message.includes("REQUEST_IN_PROGRESS_ERROR")) {
-                logger.debug("Request failed because another request was already in progress. Waiting 30 seconds and trying again.");
-                await sleep(30000);
                 return await this.apiRequestRetry(needsKeys, needsAuth, gotOptions, numRetries + 1);
             }
             else {
+                // If we are on the remote service domain, we fail fast instead of looping
                 throw err;
             }
         }
