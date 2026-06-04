@@ -496,7 +496,7 @@ def handle_from_robot(raw_data, addr):
     # --- Local AOK Spoofing ---
     if len(parts) >= 2 and parts[0].startswith('>LR3'):
         device_id = parts[1]
-        fake_aok = f"AOK,{device_id}"
+        fake_aok = f"AOK,{device_id}\r\n"
         try:
             # The robot expects the server response on port 2000
             sock_server.sendto(fake_aok.encode('utf-8'), (addr[0], 2000))
