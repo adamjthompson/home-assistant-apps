@@ -1,5 +1,8 @@
 # Changelog
 
+# 1.2.5
+- Added additional error code states
+
 # 1.2.4
 - Added app icon
 

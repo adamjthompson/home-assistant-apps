@@ -42,24 +42,38 @@ ADDON_ID         = "litter_robot_proxy"
 # ─── Status codes ─────────────────────────────────────────────────────────────
 
 STATUS_MAP = {
-    "CCC": "Complete",
-    "CCP": "Cleaning",
-    "CSF": "Cat Sensor Fault",
-    "SCF": "Cat Sensor Fault",
-    "CSI": "Cat Interrupted",
-    "CST": "Waiting",
-    "DF1": "Almost Full",
-    "DF2": "Nearly Full",
-    "DFS": "Full",
-    "SDF": "Full",
-    "BR":  "Bonnet Removed",
-    "P":   "Paused",
-    "OFF": "Off",
-    "Rdy": "Ready",
+    "BR":      "Bonnet Removed",
+    "CCC":     "Clean Cycle Complete",
+    "CCP":     "Clean Cycle In Progress",
+    "CD":      "Cat Detected",
+    "CSF":     "Cat Sensor Fault",
+    "CSI":     "Cat Sensor Interrupted",
+    "CST":     "Cat Sensor Timing",
+    "DF1":     "Drawer Almost Full - 2 Cycles Left",
+    "DF2":     "Drawer Almost Full - 1 Cycle Left",
+    "DFS":     "Drawer Full",
+    "DHF":     "Dump + Home Position Fault",
+    "DPF":     "Dump Position Fault",
+    "EC":      "Empty Cycle",
+    "HPF":     "Home Position Fault",
+    "OFF":     "Off",
     "offline": "Offline",
+    "OTF":     "Over Torque Fault",
+    "P":       "Paused",
+    "PD":      "Pinch Detect",
+    "PWRD":    "Powering Down",
+    "PWRU":    "Powering Up",
+    "Rdy":     "Ready",
+    "SCF":     "Cat Sensor Fault At Startup",
+    "SDF":     "Drawer Full At Startup",
+    "SPF":     "Pinch Detect At Startup",
 }
 
-ERROR_STATES       = {"CSF", "SCF", "BR", "P", "OFF", "offline"}
+ERROR_STATES = {
+    "BR", "CSF", "DHF", "DPF", "HPF", "OFF", 
+    "offline", "OTF", "P", "PD", "SCF", "SPF"
+}
+
 DRAWER_FULL_STATES = {"DFS", "SDF"}
 
 # ─── Load options ─────────────────────────────────────────────────────────────
