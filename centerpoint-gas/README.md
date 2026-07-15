@@ -69,19 +69,15 @@ token needed.
 ```yaml
 centerpoint_username: "your-centerpoint-username"
 centerpoint_password: "your-centerpoint-password"
-centerpoint_meter_number: "D000000489592"
-centerpoint_installation_id: "0011363143"
 gmail_address: "you@gmail.com"
 gmail_app_password: "your-gmail-app-password"
 cycles_back: 3
 run_interval_hours: 24
 ```
 
-- `centerpoint_meter_number` / `centerpoint_installation_id` come from the
-  `MeterNumber=`/`Installation=` query parameters in the billing-history
-  page's URL once logged into `myaccount.centerpointenergy.com` normally in a
-  browser -- account-specific, so kept as config rather than hardcoded into
-  the add-on itself.
+- No meter number or installation ID to configure -- the billing-history
+  page auto-populates those for the logged-in account once you navigate
+  there without them.
 - `gmail_app_password` requires 2-Step Verification enabled on the Google
   account to generate (Google Account → Security → App passwords).
 - `cycles_back` controls how many recent meter-read rows are (re-)imported

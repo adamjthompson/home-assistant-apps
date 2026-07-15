@@ -44,12 +44,6 @@ log = logging.getLogger("centerpoint_gas")
 
 CENTERPOINT_USERNAME = os.environ["CENTERPOINT_USERNAME"]
 CENTERPOINT_PASSWORD = os.environ["CENTERPOINT_PASSWORD"]
-# The meter/installation IDs are account-specific identifiers baked into the
-# billing-history URL's query string -- kept as config rather than hardcoded
-# into this shipped script, the same way credentials are config rather than
-# committed values.
-CENTERPOINT_METER_NUMBER = os.environ["CENTERPOINT_METER_NUMBER"]
-CENTERPOINT_INSTALLATION_ID = os.environ["CENTERPOINT_INSTALLATION_ID"]
 GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 CYCLES_BACK = int(os.environ.get("CYCLES_BACK", 3))
@@ -80,13 +74,12 @@ def _build_login_url():
 
 
 def _build_billing_history_url():
-    params = {
-        "MeterNumber": CENTERPOINT_METER_NUMBER,
-        "Installation": CENTERPOINT_INSTALLATION_ID,
-        "Lob": "20",
-        "DefaultLobType": "20",
-        "ST": "Gas",
-    }
+    # MeterNumber/Installation are account-specific but auto-populate once
+    # logged in (confirmed: navigating without them still lands on the right
+    # meter's history for a single-meter account) -- Lob/DefaultLobType/ST
+    # are fixed view-selector params (which utility service to show), not
+    # account-specific, so no per-account config is needed here at all.
+    params = {"Lob": "20", "DefaultLobType": "20", "ST": "Gas"}
     return f"https://myaccount.centerpointenergy.com/UsageView/UsageHistory?{urlencode(params)}"
 
 # `/data` is this add-on's own private persistent volume (unlike `/share`,
@@ -218,29 +211,54 @@ async def scrape_billing_history(page):
     # Charges columns, but the table's real selector/markup is unconfirmed --
     # this matches by visible header text rather than a guessed CSS
     # selector, which should be more resilient to markup we haven't seen.
-    rows = await page.evaluate(
+    #
+    # Wait explicitly for the header text rather than relying solely on
+    # "networkidle" from the caller's page.goto -- a client-rendered table
+    # can still finish rendering a moment after the network itself goes
+    # quiet.
+    try:
+        await page.get_by_text("Reading Date", exact=False).first.wait_for(timeout=15_000)
+    except Exception:
+        pass  # fall through to the diagnostic dump below either way
+
+    result = await page.evaluate(
         """
         () => {
             const tables = Array.from(document.querySelectorAll('table'));
             for (const table of tables) {
                 const headerText = table.innerText.slice(0, 500);
                 if (headerText.includes('Reading Date') && headerText.includes('Therms')) {
-                    return Array.from(table.querySelectorAll('tbody tr')).map(
-                        tr => Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim())
-                    );
+                    return {
+                        rows: Array.from(table.querySelectorAll('tbody tr')).map(
+                            tr => Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim())
+                        ),
+                    };
                 }
             }
-            return null;
+            return {
+                rows: null,
+                tableCount: tables.length,
+                tableSnippets: tables.map(t => t.innerText.slice(0, 200)),
+                bodySnippet: document.body.innerText.slice(0, 2000),
+            };
         }
         """
     )
-    if rows is None:
+    if result["rows"] is None:
+        # Logged rather than saved to a file (this add-on deliberately
+        # doesn't write debug screenshots/HTML to disk) -- enough to diagnose
+        # from the container log without needing a separate artifact.
+        log.error("Page URL when the table wasn't found: %s", page.url)
+        log.error("Found %d <table> element(s) on the page", result.get("tableCount", 0))
+        for i, snippet in enumerate(result.get("tableSnippets", [])):
+            log.error("  table[%d] text: %r", i, snippet)
+        log.error("Page body text snippet: %r", result.get("bodySnippet", ""))
         raise RuntimeError(
             "Could not find the billing-history table on the page -- the real "
             "page structure doesn't match what scrape_billing_history expects, "
-            "check the live page and update this function"
+            "see the debug output logged above and update this function"
         )
-    return rows
+    return result["rows"]
 
 
 async def scrape_gas_usage():

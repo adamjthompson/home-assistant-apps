@@ -5,12 +5,6 @@ configuration:
   centerpoint_password:
     name: CenterPoint Password
     description: "Your CenterPoint Energy account login password."
-  centerpoint_meter_number:
-    name: Meter Number
-    description: "Your gas meter number, found in the billing-history page's URL (MeterNumber= query parameter) after logging into myaccount.centerpointenergy.com."
-  centerpoint_installation_id:
-    name: Installation ID
-    description: "Your installation ID, found in the billing-history page's URL (Installation= query parameter) after logging into myaccount.centerpointenergy.com."
   gmail_address:
     name: Gmail Address
     description: "The Gmail address that receives CenterPoint's 2FA verification-code emails."

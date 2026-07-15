@@ -2,8 +2,6 @@
 
 export CENTERPOINT_USERNAME=$(bashio::config 'centerpoint_username')
 export CENTERPOINT_PASSWORD=$(bashio::config 'centerpoint_password')
-export CENTERPOINT_METER_NUMBER=$(bashio::config 'centerpoint_meter_number')
-export CENTERPOINT_INSTALLATION_ID=$(bashio::config 'centerpoint_installation_id')
 export GMAIL_ADDRESS=$(bashio::config 'gmail_address')
 export GMAIL_APP_PASSWORD=$(bashio::config 'gmail_app_password')
 export CYCLES_BACK=$(bashio::config 'cycles_back')
