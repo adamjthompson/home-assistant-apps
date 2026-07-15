@@ -215,7 +215,12 @@ async def _login_with_2fa(page):
         )
         raise RuntimeError("Login did not proceed past the sign-in page -- see logged page text above")
 
-    await page.wait_for_load_state("networkidle")
+    # "networkidle" is unreliable on real-world sites (confirmed via a live
+    # run: it hung the full 30s timeout here even though "load" had already
+    # fired) -- many pages have persistent background network activity
+    # (analytics, heartbeats, etc.) that never goes fully idle. "load" is a
+    # much more robust signal that the page itself is actually usable.
+    await page.wait_for_load_state("load")
 
     # TODO: unconfirmed -- this step only appears after a real login, which
     # hasn't happened yet. Update the selector/detection once seen for real.
@@ -224,7 +229,7 @@ async def _login_with_2fa(page):
         code = await fetch_2fa_code(after_time=login_start_time)
         await page.fill('input[name="verificationCode"]', code)
         await page.click('button[type="submit"]')
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_load_state("load")
     else:
         log.info("No 2FA challenge -- device appears to be remembered")
 
@@ -298,7 +303,7 @@ async def scrape_gas_usage():
 
         try:
             log.info("Navigating to billing history")
-            await page.goto(billing_history_url, wait_until="networkidle")
+            await page.goto(billing_history_url, wait_until="load")
 
             if await _needs_login(page):
                 if "login.centerpointenergy.com" not in page.url:
@@ -306,9 +311,9 @@ async def scrape_gas_usage():
                     # navigate there explicitly rather than assume it always
                     # will.
                     log.info("Not auto-redirected to login -- navigating there directly")
-                    await page.goto(_build_login_url(), wait_until="networkidle")
+                    await page.goto(_build_login_url(), wait_until="load")
                 await _login_with_2fa(page)
-                await page.goto(billing_history_url, wait_until="networkidle")
+                await page.goto(billing_history_url, wait_until="load")
 
             raw_rows = await scrape_billing_history(page)
             # Re-save after every successful run (login or reused session)

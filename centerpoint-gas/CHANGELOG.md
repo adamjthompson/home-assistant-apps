@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Replaced every `wait_for_load_state("networkidle")`/`wait_until="networkidle"` call with `"load"` after a live run showed `networkidle` hanging the full 30s timeout even though the page's `load` event had already fired -- a known Playwright gotcha where persistent background network activity (analytics, heartbeats, etc.) on real-world sites can keep `networkidle` from ever resolving. This was the actual cause of the 0.1.2 fix's own next step timing out.
+
 ## 0.1.2
 
 - Fixed a real login bug found via a live run: clicking the sign-in button only triggers an async JS handler (an AJAX POST, not a plain form submit), so `wait_for_load_state("networkidle")` alone could resolve before that round-trip actually finished and redirected away -- the code would then wrongly read "still on the unsubmitted sign-in page" as "login succeeded, no 2FA needed" and proceed to re-request the billing-history page, which just bounced back to login again. Now waits explicitly for the browser to leave the login domain (with a clear error + page-text dump if it doesn't within 30s) before checking for a 2FA prompt.
