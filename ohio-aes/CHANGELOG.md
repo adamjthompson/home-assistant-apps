@@ -3,6 +3,7 @@
 ## 0.2.0
 
 - Replaced MQTT publishing with direct Home Assistant long-term statistics import: MQTT state changes are timestamped at message-arrival time regardless of any date/hour embedded in the payload, so usage was showing up on charts dated to whenever the app happened to run rather than the day/hour it actually occurred (compounded by AES's 1-2 day data-finalization lag). Hourly totals are now imported via `recorder/import_statistics` as an external statistic (`ohio_aes:hourly_usage`), correctly dated and ready to add as an Energy Dashboard source. This removes the MQTT broker dependency and all `mqtt_*` config options entirely, and adds `homeassistant_api: true` so the app can call HA's own API (no manual token needed). Breaking change for anyone who had wired the old `mqtt_topic`/`mqtt_topic_hourly` topics into their own dashboards or automations.
+- The statistics import keeps a running cumulative total in `/share/ohio_aes_state.json` (Home Assistant's Energy Dashboard needs a monotonically increasing `sum`, not each hour's discrete kWh). If `days_back` is increased, the newly-exposed older hours are deliberately skipped rather than imported, since there's no reliable prior baseline to build their cumulative total on without corrupting every already-imported hour after them -- a logged warning notes when this happens.
 
 ## 0.1.9
 

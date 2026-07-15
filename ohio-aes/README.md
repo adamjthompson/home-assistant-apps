@@ -76,6 +76,15 @@ data into daily/monthly views on its own -- and no raw 15-minute-resolution
 data either, since HA's statistics tables are hourly-resolution regardless
 of import mechanism.
 
+**Increasing `days_back` does not backfill the older history it newly
+exposes.** The Energy Dashboard needs each hour's cumulative running total,
+not just that hour's usage, and there's no reliable prior baseline to build
+that total on for hours older than what's already been imported -- doing so
+would corrupt every already-imported hour after them. The app detects this
+and skips those older hours (logging a warning), rather than risk corrupting
+existing history. Re-running with `days_back` back at its old value, or
+smaller, is always safe.
+
 Behind the scenes, the app keeps a small ledger at
 `/share/ohio_aes_state.json` tracking the cumulative running total the
 Energy Dashboard needs (statistics `sum` values must always increase, so HA

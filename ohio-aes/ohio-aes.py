@@ -210,12 +210,17 @@ def trim_state_hours(state, retention_days):
 
 
 def resolve_anchor(state, earliest_hour):
-    # Most recent locally-known hour strictly before this run's window -- its
-    # sum is the correct baseline to accumulate from. Deliberately NOT just
-    # "earliest_hour minus one hour": when this run's window overlaps
-    # previously-seen hours (the normal case, by design), there usually is no
-    # local entry for exactly that preceding hour, and blindly falling back to
-    # high-water in that situation would double-count the overlap.
+    # If this run's window starts exactly at an hour we already have local
+    # history for (the common case, since days_back windows overlap by
+    # design), back out that hour's own contribution to get the baseline
+    # immediately before it -- rather than searching for a *strictly earlier*
+    # local hour, which usually won't exist for exactly the preceding hour.
+    if earliest_hour in state["hours"]:
+        prior = state["hours"][earliest_hour]
+        return earliest_hour, round(prior["sum"] - prior["kwh"], 3)
+
+    # Otherwise, most recent locally-known hour strictly before this run's
+    # window -- its sum is the correct baseline to accumulate from.
     earlier_hours = [h for h in state["hours"] if h < earliest_hour]
     if earlier_hours:
         anchor_hour = max(earlier_hours)
@@ -247,6 +252,28 @@ def compute_statistics_entries(hourly_totals, state):
         return [], state
 
     hours = dict(state.get("hours", {}))
+
+    # Never let a widened export window (e.g. `days_back` increased, then the
+    # app restarted) reach further into the past than what we've already
+    # established a reliable cumulative baseline for. There's no valid
+    # anchor for hours older than our local retention, and recomputing them
+    # from scratch would corrupt the existing (much larger) cumulative sum
+    # for every hour after them -- a documented limitation, not a bug:
+    # increasing `days_back` doesn't backfill history it newly exposes.
+    if hours:
+        earliest_known = min(hours)
+        skipped = sorted(h for h in hourly_totals if h < earliest_known)
+        if skipped:
+            log.warning(
+                "Ignoring %d hour(s) before %s (earliest hour with a known cumulative "
+                "baseline) -- likely 'days_back' was increased; these can't be safely "
+                "backfilled without corrupting already-imported statistics",
+                len(skipped), earliest_known,
+            )
+            hourly_totals = {h: v for h, v in hourly_totals.items() if h >= earliest_known}
+            if not hourly_totals:
+                return [], state
+
     earliest_hour = min(hourly_totals)
     _, running = resolve_anchor(state, earliest_hour)
 
