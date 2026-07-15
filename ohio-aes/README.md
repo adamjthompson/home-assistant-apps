@@ -85,6 +85,20 @@ and skips those older hours (logging a warning), rather than risk corrupting
 existing history. Re-running with `days_back` back at its old value, or
 smaller, is always safe.
 
+AES's export also reliably pads a several-hour mid-day window every day with
+a literal `0.00` kWh reading instead of a real value (for this account,
+consistently 9:45am-1:45pm) -- a residential meter doesn't actually draw
+zero for hours at a stretch, so this is treated as a reporting placeholder,
+not real "no usage" data. Runs of 1+ hour of exact-zero readings, bounded by
+real readings on both sides, are estimated instead: a smooth curve between
+the last real reading before the gap and the first real reading after it,
+rather than importing a false zero-usage dip. This is an estimate, not a
+measurement -- there's no way to flag it as such once imported, so every
+fill is logged (at warning level) with the before/after values it curved
+between. Gaps longer than 6 hours are left alone rather than estimated,
+since something that long is more likely a genuine outage than the usual
+daily placeholder.
+
 Behind the scenes, the app keeps a small ledger at
 `/share/ohio_aes_state.json` tracking the cumulative running total the
 Energy Dashboard needs (statistics `sum` values must always increase, so HA

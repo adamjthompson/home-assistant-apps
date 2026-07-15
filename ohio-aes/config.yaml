@@ -1,6 +1,6 @@
 name: "AES Ohio Energy Usage"
 description: "Logs into AES Ohio (myprofile.aes-ohio.com), downloads your electricity usage, and imports it into Home Assistant's long-term statistics for the Energy Dashboard."
-version: "0.2.2"
+version: "0.2.3"
 slug: "ohio_aes"
 init: false
 arch:

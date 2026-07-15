@@ -137,6 +137,101 @@ def _parse_export_date(date_str):
     raise ValueError(f"Unrecognized export DATE format: {date_str!r}")
 
 
+_INTERVAL_MINUTES = 15
+_INTERVAL_STEP = timedelta(minutes=_INTERVAL_MINUTES)
+
+# AES/Opower's export reliably pads several consecutive 15-minute rows
+# mid-day (observed daily, exactly 9:45am-1:45pm) with a literal 0.00 kWh
+# instead of omitting them or reporting a real reading -- a residential meter
+# doesn't actually draw zero for a 4-hour stretch every single day regardless
+# of weekday/weekend, and 0.00 doesn't appear anywhere else in the export, so
+# this reads as a reporting placeholder rather than real "no usage" data.
+# Runs of at least this many consecutive exact-zero readings, bounded by real
+# (nonzero) readings on both sides, are treated as missing rather than
+# genuine zero usage.
+_SUSPECT_ZERO_RUN = 4
+
+# Rather than import a gap (missing or zero-padded rows) as a false
+# zero-usage dip, a gap fully bounded by real readings on both sides is
+# filled with an estimate -- but only up to this long; anything longer is far
+# more likely a genuine outage (meter down, account inactive, add-on off for
+# a while) than the same daily reporting hole, and silently fabricating hours
+# of history for that would be worse than leaving it missing.
+_MAX_FILLABLE_GAP = timedelta(hours=6)
+
+
+def _smoothstep(t):
+    return t * t * (3 - 2 * t)
+
+
+def _strip_suspect_zero_runs(readings):
+    """Un-fill runs of exact-zero readings that look like a reporting
+    placeholder rather than real zero usage, so _fill_interval_gaps below
+    estimates them instead of importing a false zero-usage dip.
+    """
+    ordered = sorted(readings)
+    stripped = dict(readings)
+
+    run_start = None
+    for i, ts in enumerate(ordered):
+        if readings[ts] == 0.0:
+            if run_start is None:
+                run_start = i
+            continue
+        if run_start is not None and run_start > 0 and i - run_start >= _SUSPECT_ZERO_RUN:
+            for j in range(run_start, i):
+                del stripped[ordered[j]]
+        run_start = None
+
+    return stripped
+
+
+def _fill_interval_gaps(readings):
+    """Estimate missing 15-minute readings strictly between two known ones.
+
+    Each missing run is interpolated with a smoothstep (ease-in-out) curve
+    from the last known reading before the gap to the first known reading
+    after it, rather than a straight linear ramp -- these are estimates, not
+    measurements, and HA's import_statistics has no way to flag them as such,
+    so every fill is logged here for anyone auditing the add-on's logs.
+    """
+    if len(readings) < 2:
+        return readings
+
+    filled = dict(readings)
+    ordered = sorted(readings)
+
+    for before, after in zip(ordered, ordered[1:]):
+        gap = after - before
+        missing_steps = round(gap / _INTERVAL_STEP) - 1
+        if missing_steps <= 0:
+            continue
+
+        if gap > _MAX_FILLABLE_GAP:
+            log.warning(
+                "Leaving a %s gap between %s and %s unfilled -- longer than the "
+                "%s ceiling for estimated data, likely a real outage rather than "
+                "the usual daily reporting hole",
+                gap, before, after, _MAX_FILLABLE_GAP,
+            )
+            continue
+
+        before_usage = readings[before]
+        after_usage = readings[after]
+        log.warning(
+            "Estimating %d missing 15-minute reading(s) between %s and %s "
+            "(curve from %.3f to %.3f kWh -- not measured data)",
+            missing_steps, before, after, before_usage, after_usage,
+        )
+        for i in range(1, missing_steps + 1):
+            t = i / (missing_steps + 1)
+            filled[before + _INTERVAL_STEP * i] = round(
+                before_usage + (after_usage - before_usage) * _smoothstep(t), 3
+            )
+
+    return filled
+
+
 def parse_hourly_totals(zip_path):
     with zipfile.ZipFile(zip_path) as z:
         csv_name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
@@ -148,7 +243,7 @@ def parse_hourly_totals(zip_path):
     header_idx = next(i for i, line in enumerate(lines) if line.startswith("TYPE,DATE"))
     reader = csv.DictReader(lines[header_idx:])
 
-    hourly_totals = {}
+    readings = {}
     for row in reader:
         if row.get("TYPE") != "Electric usage":
             continue
@@ -156,9 +251,16 @@ def parse_hourly_totals(zip_path):
         if not start_time:
             continue
         date = _parse_export_date(row["DATE"])
-        hour = int(start_time.split(":")[0])
-        bucket = f"{date.isoformat()}T{hour:02d}:00:00"
+        hour, minute = (int(p) for p in start_time.split(":")[:2])
+        timestamp = datetime.combine(date, datetime.min.time()) + timedelta(hours=hour, minutes=minute)
         usage = float(row["USAGE (kWh)"] or 0)
+        readings[timestamp] = readings.get(timestamp, 0.0) + usage
+
+    readings = _fill_interval_gaps(_strip_suspect_zero_runs(readings))
+
+    hourly_totals = {}
+    for timestamp, usage in readings.items():
+        bucket = timestamp.replace(minute=0, second=0, microsecond=0).isoformat()
         hourly_totals[bucket] = hourly_totals.get(bucket, 0.0) + usage
 
     return hourly_totals
