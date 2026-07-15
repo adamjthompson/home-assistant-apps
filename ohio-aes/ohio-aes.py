@@ -76,8 +76,12 @@ async def download_usage_export():
             await page.goto("http://aeso.opower.com/ei/x/dashboard", wait_until="networkidle")
             await page.wait_for_url(re.compile(r"aeso\.opower\.com"), timeout=45_000)
 
-            # NOTE: also unconfirmed against the live "Download my data" modal --
-            # check /share/ohio_aes_debug.png if this section fails.
+            # "Download my data" lives on the energy-use-details page, not the
+            # dashboard -- the dashboard goto above only establishes the
+            # authenticated Opower session.
+            log.info("Navigating to Energy Use Details")
+            await page.goto("https://aeso.opower.com/ei/x/energy-use-details/", wait_until="networkidle")
+
             log.info("Opening 'Download my data'")
             await page.get_by_text("Download my data", exact=False).click()
             await page.get_by_text("Export usage for a range of days", exact=False).click()
