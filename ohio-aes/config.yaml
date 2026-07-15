@@ -1,6 +1,6 @@
 name: "AES Ohio Energy Usage"
 description: "Logs into AES Ohio (myprofile.aes-ohio.com), downloads your daily electricity usage, and publishes it to Home Assistant via MQTT."
-version: "0.1.1"
+version: "0.1.2"
 slug: "ohio_aes"
 init: false
 arch:

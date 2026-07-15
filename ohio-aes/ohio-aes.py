@@ -66,13 +66,15 @@ async def download_usage_export():
             await page.click('input[name="ctl00$MainContent$LoginControl$btnLogin"]')
             await page.wait_for_load_state("networkidle")
 
-            # NOTE: the exact link text/target on the post-login AES Ohio dashboard
-            # hasn't been confirmed against the live site yet -- this is the most
-            # likely spot to need a selector tweak on first run. It triggers a
-            # SAML handoff (AES -> Oracle IDCS -> Opower) that lands on
-            # aeso.opower.com once followed.
+            # "My Usage" is a hover-revealed dropdown trigger (not a link itself);
+            # "PowerView" inside it opens Opower's dashboard in a new tab via the
+            # SAML handoff (AES -> Oracle IDCS -> Opower), so we have to hover to
+            # reveal the link and capture the popup as a separate Page.
             log.info("Navigating to Your Energy Use")
-            await page.get_by_role("link", name=re.compile("energy use", re.I)).first.click()
+            await page.get_by_text("My Usage", exact=True).hover()
+            async with context.expect_page() as new_page_info:
+                await page.get_by_role("link", name="PowerView").click()
+            page = await new_page_info.value
             await page.wait_for_url(re.compile(r"aeso\.opower\.com"), timeout=45_000)
             await page.wait_for_load_state("networkidle")
 
