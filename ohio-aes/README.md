@@ -1,8 +1,9 @@
 # AES Ohio Energy Usage — Home Assistant App
 
 Logs into your AES Ohio account (`myprofile.aes-ohio.com`), downloads your
-electricity usage, and publishes both a daily and an hourly total to Home
-Assistant via MQTT.
+electricity usage, and imports correctly-dated hourly totals directly into
+Home Assistant's long-term statistics, so the **Energy Dashboard** shows
+accurate history.
 
 ## How it works
 
@@ -22,8 +23,18 @@ drives a real headless Chromium (via Playwright) through the whole login
 and export flow rather than trying to hand-replicate the redirects. Once on
 the usage page, it uses the built-in **Download my data** export (the same
 "Green Button" feature available in the portal UI) to get 15-minute
-interval usage as CSV, and sums it into both a daily total and an hourly
-total, publishing the most recent of each to MQTT.
+interval usage as CSV, and sums it into hourly totals.
+
+Those hourly totals are imported into Home Assistant via the recorder's
+`recorder/import_statistics` WebSocket command as an external statistic
+(`ohio_aes:hourly_usage`) -- not published as a plain MQTT sensor. This
+matters: a regular sensor state is always timestamped at the moment it's
+received, not by any date/time embedded in its payload, so a value that's
+lagging a day or two behind (AES's data isn't finalized instantly) would show
+up on a chart dated "now" instead of when it actually happened. Statistics
+import lets each hour's usage carry its own real timestamp, so history and
+the Energy Dashboard are dated correctly no matter how far behind AES's data
+finalization runs.
 
 ## Installation
 
@@ -32,47 +43,47 @@ total, publishing the most recent of each to MQTT.
 3. Add this repository URL
 4. Find **AES Ohio Energy Usage** and click **Install**
 
+This app requests `homeassistant_api: true`, which lets Supervisor hand it a
+scoped token to call Home Assistant's own API -- there's nothing to set up
+for this yourself; no manual long-lived access token needed.
+
 ## Configuration
 
 ```yaml
 aes_username: "your-aes-ohio-username"
 aes_password: "your-aes-ohio-password"
-mqtt_host: "core-mosquitto"
-mqtt_port: 1883
-mqtt_user: ""
-mqtt_pass: ""
-mqtt_topic: "homeassistant/aes/usage"
-mqtt_topic_hourly: "homeassistant/aes/usage_hourly"
 days_back: 3
 run_interval_hours: 12
 ```
 
 `days_back` controls how many days of usage history are requested on each
-run (a few days of overlap covers AES's data-finalization lag); the app
-always publishes the most recent day (and most recent hour) it received.
-`run_interval_hours` controls how often it logs in and re-checks.
+run (a few days of overlap covers AES's data-finalization lag, and lets the
+app re-send and correct recently-finalized hours). `run_interval_hours`
+controls how often it logs in and re-checks.
 
-## MQTT payload and sensors
+## Home Assistant statistics
 
-Each run publishes retained MQTT Discovery config to
-`homeassistant/sensor/aes_ohio_{daily,hourly}_usage/config`, so Home
-Assistant automatically creates two sensors under an "AES Ohio Energy Usage"
-device -- no manual `configuration.yaml` sensor setup needed:
+Each run imports hourly kWh totals into the external statistic
+`ohio_aes:hourly_usage`. To use it:
 
-- **`sensor.aes_ohio_daily_usage`** -- state topic `mqtt_topic`:
-  ```json
-  { "date": "2026-07-14", "kwh": 21.436 }
-  ```
-- **`sensor.aes_ohio_hourly_usage`** -- state topic `mqtt_topic_hourly`, for
-  the most recent complete hour in the export:
-  ```json
-  { "hour": "2026-07-14T13:00:00", "kwh": 1.436 }
-  ```
+1. Go to **Settings → Dashboards → Energy**
+2. Under "Electricity grid", add a consumption source and select
+   **AES Ohio Hourly Usage** (`ohio_aes:hourly_usage`)
 
-Discovery assumes the default `homeassistant` discovery prefix; if you've
-customized your MQTT integration's discovery prefix, the sensors won't be
-picked up automatically and you'd need to publish equivalent sensor YAML
-yourself using the state topics above.
+You can also inspect it directly under **Developer Tools → Statistics**.
+There's no separate daily statistic -- Home Assistant aggregates the hourly
+data into daily/monthly views on its own -- and no raw 15-minute-resolution
+data either, since HA's statistics tables are hourly-resolution regardless
+of import mechanism.
+
+Behind the scenes, the app keeps a small ledger at
+`/share/ohio_aes_state.json` tracking the cumulative running total the
+Energy Dashboard needs (statistics `sum` values must always increase, so HA
+can compute period consumption as the delta between them). Re-running the
+app, including re-sending the overlapping `days_back` window, is always safe
+-- HA overwrites existing hours rather than double-counting them, and a
+revised hour's cumulative total correctly carries forward through every later
+hour in that run's batch.
 
 ## First-run debugging
 
@@ -88,6 +99,11 @@ page's HTML to the Home Assistant `share` folder:
 
 Check the app's log for where it failed, look at the screenshot, and adjust
 the corresponding `page.get_by_...` selector in `ohio-aes.py`.
+
+If only the statistics-import step fails (the log will say so, but the run
+overall won't be marked failed), that's most often a temporary HA API/token
+issue -- it retries automatically next `run_interval_hours` cycle and
+self-corrects thanks to the overlap window above.
 
 ## Notes
 

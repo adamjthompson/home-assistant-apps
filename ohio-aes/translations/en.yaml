@@ -5,24 +5,9 @@ configuration:
   aes_password:
     name: AES Ohio Password
     description: "Your myprofile.aes-ohio.com login password."
-  mqtt_host:
-    name: MQTT Host
-    description: "Hostname or IP address of the MQTT broker. Default is generally 'core-mosquitto' or 'localhost'."
-  mqtt_port:
-    name: MQTT Port
-    description: "Port number of the MQTT broker. Default is 1883."
-  mqtt_user:
-    name: MQTT Username
-    description: "Username for MQTT authentication."
-  mqtt_pass:
-    name: MQTT Password
-    description: "Password for MQTT authentication."
-  mqtt_topic:
-    name: MQTT Topic
-    description: "Topic to publish the latest daily usage reading to."
   days_back:
     name: Days Back
-    description: "How many days of usage history to request on each run. A few days of overlap covers any lag before AES finalizes a day's data."
+    description: "How many days of usage history to request on each run. A few days of overlap covers any lag before AES finalizes an hour's data."
   run_interval_hours:
     name: Run Interval (hours)
-    description: "How often to log in and re-check usage. Usage data is daily, so there's no benefit running more than a few times a day."
+    description: "How often to log in and re-check usage. Usage data is hourly, so there's no benefit running more than a few times a day."

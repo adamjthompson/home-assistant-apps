@@ -3,7 +3,10 @@
 AES Ohio Energy Usage
 Logs into myprofile.aes-ohio.com, follows the SAML/OIDC handoff to AES's
 Opower-hosted usage portal (aeso.opower.com), downloads the interval usage
-export, and publishes the latest day's total to Home Assistant via MQTT.
+export, and imports the latest hourly totals into Home Assistant's long-term
+statistics as an external statistic, so the Energy Dashboard shows correctly
+-dated history (a plain sensor state can't be backdated -- HA timestamps
+state changes at message-arrival time, not by any embedded date/time).
 
 Login itself is a three-domain federation (AES Ohio ASP.NET WebForms ->
 Oracle Identity Cloud Service SAML/OAuth -> Opower), so a real browser
@@ -12,7 +15,6 @@ Oracle Identity Cloud Service SAML/OAuth -> Opower), so a real browser
 
 import asyncio
 import csv
-import io
 import json
 import logging
 import os
@@ -20,8 +22,9 @@ import re
 import sys
 import zipfile
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
-import paho.mqtt.publish as mqtt_publish
+import aiohttp
 from playwright.async_api import async_playwright
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -31,15 +34,7 @@ log = logging.getLogger("ohio_aes")
 
 AES_USERNAME = os.environ["AES_USERNAME"]
 AES_PASSWORD = os.environ["AES_PASSWORD"]
-MQTT_HOST = os.environ.get("MQTT_HOST", "core-mosquitto")
-MQTT_PORT = int(os.environ.get("MQTT_PORT", 1883))
-MQTT_USER = os.environ.get("MQTT_USER", "") or None
-MQTT_PASS = os.environ.get("MQTT_PASS", "") or None
-MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "homeassistant/aes/usage")
-MQTT_TOPIC_HOURLY = os.environ.get("MQTT_TOPIC_HOURLY", "homeassistant/aes/usage_hourly")
 DAYS_BACK = int(os.environ.get("DAYS_BACK", 3))
-
-MQTT_DISCOVERY_PREFIX = "homeassistant"
 
 CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "/usr/bin/chromium-browser")
 DEBUG_SCREENSHOT = "/share/ohio_aes_debug.png"
@@ -47,6 +42,18 @@ DEBUG_HTML = "/share/ohio_aes_debug.html"
 DOWNLOAD_PATH = "/tmp/ohio_aes_export.zip"
 
 LOGIN_URL = "https://myprofile.aes-ohio.com/Profile/Login.aspx"
+
+# `homeassistant_api: true` in config.yaml makes Supervisor inject this token
+# and proxy these two hosts to HA Core -- no manual long-lived token needed.
+SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN")
+SUPERVISOR_API_BASE = "http://supervisor/core/api"
+SUPERVISOR_WS_URL = "ws://supervisor/core/websocket"
+
+# "external" statistic (colon-separated, not a real entity/integration domain)
+# -- this is what gets added as an Energy Dashboard grid-consumption source.
+STATISTIC_ID = "ohio_aes:hourly_usage"
+STATE_PATH = "/share/ohio_aes_state.json"
+STATS_RETENTION_DAYS = DAYS_BACK + 2
 
 
 # ─── Browser automation ───────────────────────────────────────────────────────
@@ -71,9 +78,9 @@ async def download_usage_export():
 
             # "PowerView" (the "My Usage" dropdown's link to Opower) opens in a new
             # tab via the SAML handoff (AES -> Oracle IDCS -> Opower). Its dropdown
-            # is CSS hover-only and closes mid-click before Playwright can reach it,
-            # so rather than fight that we open the known target URL directly in a
-            # new tab in the same (already-authenticated) browser context.
+            # is CSS hover-only and closes mid-click before Playwright could reach
+            # it, so rather than fight that we open the known target URL directly
+            # in a new tab in the same (already-authenticated) browser context.
             log.info("Navigating to Your Energy Use")
             page = await context.new_page()
             await page.goto("http://aeso.opower.com/ei/x/dashboard", wait_until="networkidle")
@@ -124,8 +131,8 @@ async def download_usage_export():
 
 # The export's DATE column format has been observed as both "7/11/26" and
 # "2026-07-13" across runs -- likely a locale difference between the
-# container's headless Chromium and a regular browser -- so hourly bucketing
-# parses defensively against either rather than assuming one.
+# container's headless Chromium and a regular browser -- so parsing is
+# defensive against either rather than assuming one.
 _EXPORT_DATE_FORMATS = ("%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d")
 
 
@@ -138,33 +145,13 @@ def _parse_export_date(date_str):
     raise ValueError(f"Unrecognized export DATE format: {date_str!r}")
 
 
-def parse_daily_totals(zip_path):
+def parse_hourly_totals(zip_path):
     with zipfile.ZipFile(zip_path) as z:
         csv_name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
         raw = z.read(csv_name).decode("utf-8-sig")
 
     # The export has a few "Name,/Address,/Account Number," metadata lines
     # before the real interval table -- find the actual header row.
-    lines = raw.splitlines()
-    header_idx = next(i for i, line in enumerate(lines) if line.startswith("TYPE,DATE"))
-    reader = csv.DictReader(lines[header_idx:])
-
-    daily_totals = {}
-    for row in reader:
-        if row.get("TYPE") != "Electric usage":
-            continue
-        date = row["DATE"]
-        usage = float(row["USAGE (kWh)"] or 0)
-        daily_totals[date] = daily_totals.get(date, 0.0) + usage
-
-    return daily_totals
-
-
-def parse_hourly_totals(zip_path):
-    with zipfile.ZipFile(zip_path) as z:
-        csv_name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
-        raw = z.read(csv_name).decode("utf-8-sig")
-
     lines = raw.splitlines()
     header_idx = next(i for i, line in enumerate(lines) if line.startswith("TYPE,DATE"))
     reader = csv.DictReader(lines[header_idx:])
@@ -185,99 +172,181 @@ def parse_hourly_totals(zip_path):
     return hourly_totals
 
 
-# ─── MQTT publish ──────────────────────────────────────────────────────────────
+# ─── Statistics import ─────────────────────────────────────────────────────────
+#
+# HA's `recorder/import_statistics` is WebSocket-only (there is no REST
+# service for it), and requires `sum` to be a monotonically increasing
+# cumulative running total -- not the discrete per-hour kWh amount -- since
+# the Energy Dashboard computes displayed consumption as the delta between
+# consecutive `sum` values. A local ledger in /share tracks that running
+# total across runs (the container has no in-memory state between runs, and
+# is the only persistent storage this add-on has). Re-submitting an hour
+# that already exists safely overwrites it, so recomputing and resubmitting
+# this run's whole overlap window every time is safe and self-correcting if
+# AES revises a recent hour's value.
 
-def _mqtt_auth():
-    return {"username": MQTT_USER, "password": MQTT_PASS} if MQTT_USER else None
+def load_state():
+    try:
+        with open(STATE_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"schema_version": 1, "hours": {}, "high_water_hour": None, "high_water_sum": 0.0}
 
 
-def _mqtt_publish(topic, payload):
-    mqtt_publish.single(
-        topic,
-        payload=json.dumps(payload),
-        retain=True,
-        hostname=MQTT_HOST,
-        port=MQTT_PORT,
-        auth=_mqtt_auth(),
-    )
+def save_state(state):
+    tmp_path = f"{STATE_PATH}.tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp_path, STATE_PATH)
 
 
-def publish_discovery_configs():
-    # Without this, the state topics below are just bare MQTT messages -- Home
-    # Assistant has no entity to attach them to unless the user hand-writes
-    # sensor YAML. Publishing retained discovery configs makes the sensors
-    # appear automatically (standard HA MQTT discovery convention).
-    device = {
-        "identifiers": ["aes_ohio"],
-        "name": "AES Ohio Energy Usage",
-        "manufacturer": "AES Ohio",
+def trim_state_hours(state, retention_days):
+    cutoff = datetime.now() - timedelta(days=retention_days)
+    state["hours"] = {
+        hour: data for hour, data in state["hours"].items()
+        if datetime.fromisoformat(hour) >= cutoff
     }
-    sensors = {
-        "aes_ohio_daily_usage": {
-            "name": "AES Ohio Daily Usage",
-            "unique_id": "aes_ohio_daily_usage",
-            "object_id": "aes_ohio_daily_usage",
-            "state_topic": MQTT_TOPIC,
-            "value_template": "{{ value_json.kwh }}",
-            "unit_of_measurement": "kWh",
-            "device_class": "energy",
-            "state_class": "total",
-            "json_attributes_topic": MQTT_TOPIC,
-            "json_attributes_template": "{{ {'date': value_json.date} | tojson }}",
-            "device": device,
-        },
-        "aes_ohio_hourly_usage": {
-            "name": "AES Ohio Hourly Usage",
-            "unique_id": "aes_ohio_hourly_usage",
-            "object_id": "aes_ohio_hourly_usage",
-            "state_topic": MQTT_TOPIC_HOURLY,
-            "value_template": "{{ value_json.kwh }}",
-            "unit_of_measurement": "kWh",
-            "device_class": "energy",
-            "state_class": "total",
-            "json_attributes_topic": MQTT_TOPIC_HOURLY,
-            "json_attributes_template": "{{ {'hour': value_json.hour} | tojson }}",
-            "device": device,
-        },
-    }
-
-    for object_id, config in sensors.items():
-        _mqtt_publish(f"{MQTT_DISCOVERY_PREFIX}/sensor/{object_id}/config", config)
-
-    log.info("Published MQTT discovery config for daily/hourly sensors")
+    return state
 
 
-def publish_to_mqtt(daily_totals):
-    if not daily_totals:
-        log.warning("No usage data parsed, nothing to publish")
-        return
+def resolve_anchor(state, earliest_hour):
+    # Most recent locally-known hour strictly before this run's window -- its
+    # sum is the correct baseline to accumulate from. Deliberately NOT just
+    # "earliest_hour minus one hour": when this run's window overlaps
+    # previously-seen hours (the normal case, by design), there usually is no
+    # local entry for exactly that preceding hour, and blindly falling back to
+    # high-water in that situation would double-count the overlap.
+    earlier_hours = [h for h in state["hours"] if h < earliest_hour]
+    if earlier_hours:
+        anchor_hour = max(earlier_hours)
+        return anchor_hour, state["hours"][anchor_hour]["sum"]
 
-    latest_date = max(daily_totals)
-    latest_kwh = round(daily_totals[latest_date], 3)
-    log.info("Publishing %s kWh for %s to %s", latest_kwh, latest_date, MQTT_TOPIC)
-    _mqtt_publish(MQTT_TOPIC, {"date": latest_date, "kwh": latest_kwh})
+    high_water_hour = state.get("high_water_hour")
+    high_water_sum = state.get("high_water_sum", 0.0)
+    if high_water_hour and high_water_hour < earliest_hour:
+        # Local per-hour retention has aged out past this point, but we know a
+        # later cumulative sum exists -- resume from it. Only valid when the
+        # high-water hour genuinely precedes this window (a real gap, e.g. the
+        # add-on was down a while); otherwise this window's own hours already
+        # cover everything up to high-water and recomputing from 0 below
+        # reconstructs the same sums it produced last time.
+        log.warning(
+            "No local hourly history before %s; resuming from high-water hour %s "
+            "(any gap between them is treated as 0 kWh)",
+            earliest_hour, high_water_hour,
+        )
+        return high_water_hour, high_water_sum
+
+    if not high_water_hour:
+        log.warning("No prior statistics state found -- starting cumulative total at 0.0 from %s", earliest_hour)
+    return None, 0.0
 
 
-def publish_hourly_to_mqtt(hourly_totals):
+def compute_statistics_entries(hourly_totals, state):
     if not hourly_totals:
-        log.warning("No hourly usage data parsed, nothing to publish")
-        return
+        return [], state
+
+    hours = dict(state.get("hours", {}))
+    earliest_hour = min(hourly_totals)
+    _, running = resolve_anchor(state, earliest_hour)
+
+    entries = []
+    for hour in sorted(hourly_totals):
+        running = round(running + hourly_totals[hour], 3)
+        hours[hour] = {"kwh": hourly_totals[hour], "sum": running}
+        entries.append({"start": hour, "state": hourly_totals[hour], "sum": running})
 
     latest_hour = max(hourly_totals)
-    latest_kwh = round(hourly_totals[latest_hour], 3)
-    log.info("Publishing %s kWh for hour %s to %s", latest_kwh, latest_hour, MQTT_TOPIC_HOURLY)
-    _mqtt_publish(MQTT_TOPIC_HOURLY, {"hour": latest_hour, "kwh": latest_kwh})
+    high_water_hour = state.get("high_water_hour")
+    high_water_sum = state.get("high_water_sum", 0.0)
+    if not high_water_hour or latest_hour > high_water_hour:
+        high_water_hour = latest_hour
+        high_water_sum = hours[latest_hour]["sum"]
+
+    new_state = {
+        "schema_version": 1,
+        "hours": hours,
+        "high_water_hour": high_water_hour,
+        "high_water_sum": high_water_sum,
+    }
+    return entries, new_state
+
+
+async def get_ha_time_zone():
+    headers = {"Authorization": f"Bearer {SUPERVISOR_TOKEN}"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{SUPERVISOR_API_BASE}/config", headers=headers) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+    return ZoneInfo(data["time_zone"])
+
+
+async def import_hourly_statistics(entries, tz):
+    if not entries:
+        return
+
+    stats = [
+        {
+            "start": datetime.fromisoformat(entry["start"]).replace(tzinfo=tz).isoformat(),
+            "state": entry["state"],
+            "sum": entry["sum"],
+        }
+        for entry in entries
+    ]
+    command = {
+        "id": 1,
+        "type": "recorder/import_statistics",
+        "metadata": {
+            "has_sum": True,
+            "name": "AES Ohio Hourly Usage",
+            "source": "ohio_aes",
+            "statistic_id": STATISTIC_ID,
+            "unit_of_measurement": "kWh",
+            "mean_type": 0,
+            "unit_class": "energy",
+        },
+        "stats": stats,
+    }
+
+    headers = {"Authorization": f"Bearer {SUPERVISOR_TOKEN}"}
+    async with aiohttp.ClientSession() as session:
+        async with session.ws_connect(SUPERVISOR_WS_URL, headers=headers) as ws:
+            auth_required = await ws.receive_json()
+            if auth_required.get("type") != "auth_required":
+                raise RuntimeError(f"Unexpected HA WebSocket handshake message: {auth_required}")
+
+            await ws.send_json({"type": "auth", "access_token": SUPERVISOR_TOKEN})
+            auth_result = await ws.receive_json()
+            if auth_result.get("type") != "auth_ok":
+                raise RuntimeError(f"HA WebSocket auth failed: {auth_result}")
+
+            await ws.send_json(command)
+            result = await ws.receive_json()
+            if not result.get("success"):
+                raise RuntimeError(f"recorder/import_statistics failed: {result}")
 
 
 # ─── Entry point ───────────────────────────────────────────────────────────────
 
 async def main():
-    publish_discovery_configs()
     zip_path = await download_usage_export()
-    daily_totals = parse_daily_totals(zip_path)
-    publish_to_mqtt(daily_totals)
     hourly_totals = parse_hourly_totals(zip_path)
-    publish_hourly_to_mqtt(hourly_totals)
+    if not hourly_totals:
+        log.warning("No hourly usage data parsed, nothing to import")
+        return
+
+    state = load_state()
+    entries, new_state = compute_statistics_entries(hourly_totals, state)
+
+    try:
+        if not SUPERVISOR_TOKEN:
+            raise RuntimeError("SUPERVISOR_TOKEN not set -- is 'homeassistant_api: true' configured?")
+        tz = await get_ha_time_zone()
+        await import_hourly_statistics(entries, tz)
+        save_state(trim_state_hours(new_state, STATS_RETENTION_DAYS))
+        log.info("Imported %d hourly statistics entries (%s .. %s)", len(entries), entries[0]["start"], entries[-1]["start"])
+    except Exception:
+        log.exception("Statistics import failed -- will retry next run")
 
 
 if __name__ == "__main__":
