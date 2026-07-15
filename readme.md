@@ -14,6 +14,7 @@ Custom Home Assistant repository for my custom apps.
 | App | Description |
 |--------|-------------|
 | [Litter Robot Proxy](litter-robot-proxy/) | Local MQTT proxy for Litter Robot 3 Connect devices |
+| [AES Ohio Energy Usage](ohio-aes/) | Logs into AES Ohio and publishes daily electricity usage to MQTT |
 
 ## Requirements
 

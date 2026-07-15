@@ -1,0 +1,33 @@
+name: "AES Ohio Energy Usage"
+description: "Logs into AES Ohio (myprofile.aes-ohio.com), downloads your daily electricity usage, and publishes it to Home Assistant via MQTT."
+version: "0.1.0"
+slug: "ohio_aes"
+init: false
+arch:
+  - aarch64
+  - amd64
+startup: "services"
+boot: "auto"
+options:
+  aes_username: ""
+  aes_password: ""
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_pass: ""
+  mqtt_topic: "homeassistant/aes/usage"
+  days_back: 3
+  run_interval_hours: 12
+schema:
+  aes_username: str
+  aes_password: password
+  mqtt_host: str
+  mqtt_port: int
+  mqtt_user: str
+  mqtt_pass: password
+  mqtt_topic: str
+  days_back: int(1,30)
+  run_interval_hours: int(1,24)
+map:
+  - share:rw
+logger: true
