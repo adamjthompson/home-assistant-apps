@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- Anchored the daily gap ramp to the average of the 3 real readings on each side of the gap, instead of just the single reading immediately adjacent to it. A lone noisy 15-minute reading (e.g. an AC compressor cycling on right as reporting resumes) could otherwise pull the whole ramp toward an unrepresentative spike, making the last real hour of the gap look inflated relative to the untouched hour right after it.
+
 ## 0.2.4
 
 - Switched the daily gap estimate from a smoothstep (ease-in-out) curve to a straight linear ramp. Smoothstep has zero slope at both endpoints, so on days where the real readings right before/after the gap were already fairly flat, the estimate looked flat for the first third of the gap and then rushed through the rise in the middle third -- a fixed artifact of that curve shape, not a data issue. Linear interpolation spreads the rise evenly across the whole gap instead.

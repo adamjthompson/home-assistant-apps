@@ -182,14 +182,22 @@ def _strip_suspect_zero_runs(readings):
     return stripped
 
 
+# A single 15-minute reading is noisy (e.g. an AC compressor cycling on can
+# make one interval read 2-3x its neighbors), so anchoring a ramp to just the
+# one reading immediately adjacent to a gap risks that one spike skewing the
+# whole ramp. Averaging a few real readings on each side instead gives a
+# steadier endpoint.
+_ANCHOR_WINDOW = 3
+
+
 def _fill_interval_gaps(readings):
     """Estimate missing 15-minute readings strictly between two known ones.
 
-    Each missing run is linearly interpolated between the last known reading
-    before the gap and the first known reading after it -- these are
-    estimates, not measurements, and HA's import_statistics has no way to
-    flag them as such, so every fill is logged here for anyone auditing the
-    add-on's logs.
+    Each missing run is linearly interpolated between the average of the
+    last few real readings before the gap and the average of the first few
+    real readings after it -- these are estimates, not measurements, and
+    HA's import_statistics has no way to flag them as such, so every fill is
+    logged here for anyone auditing the add-on's logs.
     """
     if len(readings) < 2:
         return readings
@@ -197,7 +205,8 @@ def _fill_interval_gaps(readings):
     filled = dict(readings)
     ordered = sorted(readings)
 
-    for before, after in zip(ordered, ordered[1:]):
+    for idx in range(len(ordered) - 1):
+        before, after = ordered[idx], ordered[idx + 1]
         gap = after - before
         missing_steps = round(gap / _INTERVAL_STEP) - 1
         if missing_steps <= 0:
@@ -212,12 +221,15 @@ def _fill_interval_gaps(readings):
             )
             continue
 
-        before_usage = readings[before]
-        after_usage = readings[after]
+        before_window = ordered[max(0, idx - _ANCHOR_WINDOW + 1):idx + 1]
+        after_window = ordered[idx + 1:idx + 1 + _ANCHOR_WINDOW]
+        before_usage = sum(readings[ts] for ts in before_window) / len(before_window)
+        after_usage = sum(readings[ts] for ts in after_window) / len(after_window)
         log.warning(
             "Estimating %d missing 15-minute reading(s) between %s and %s "
-            "(curve from %.3f to %.3f kWh -- not measured data)",
-            missing_steps, before, after, before_usage, after_usage,
+            "(ramp from %.3f to %.3f kWh, each averaged over %d neighboring "
+            "reading(s) -- not measured data)",
+            missing_steps, before, after, before_usage, after_usage, _ANCHOR_WINDOW,
         )
         for i in range(1, missing_steps + 1):
             t = i / (missing_steps + 1)
