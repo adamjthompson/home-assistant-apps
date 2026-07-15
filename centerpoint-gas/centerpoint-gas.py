@@ -192,6 +192,29 @@ async def _login_with_2fa(page):
     if await page.locator("#rememberMe").count() > 0:
         await page.check("#rememberMe")
     await page.click("#next")
+
+    # The self-asserted form submits via an async JS handler (an AJAX POST,
+    # not a plain form POST -- see the module docstring), so
+    # wait_for_load_state("networkidle") alone can resolve before that
+    # round-trip actually finishes and redirects away. Waiting explicitly for
+    # the browser to leave the login domain is a much more reliable signal
+    # that the attempt actually completed -- confirmed necessary after a real
+    # run where "networkidle" resolved while still sitting on the unsubmitted
+    # sign-in page, and the code below wrongly read that as "no 2FA needed".
+    try:
+        await page.wait_for_function(
+            "() => !location.host.includes('login.centerpointenergy.com')",
+            timeout=30_000,
+        )
+    except Exception:
+        body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 2000)")
+        log.error(
+            "Still on the login page 30s after submitting -- likely bad "
+            "credentials or an on-page validation error. Page text: %r",
+            body_snippet,
+        )
+        raise RuntimeError("Login did not proceed past the sign-in page -- see logged page text above")
+
     await page.wait_for_load_state("networkidle")
 
     # TODO: unconfirmed -- this step only appears after a real login, which
