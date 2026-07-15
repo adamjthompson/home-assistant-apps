@@ -75,9 +75,9 @@ cycles_back: 3
 run_interval_hours: 24
 ```
 
-- No meter number or installation ID to configure -- the billing-history
-  page auto-populates those for the logged-in account once you navigate
-  there without them.
+- No meter number or installation ID to configure -- the app lands on the
+  account home page and clicks through to usage history the way a real user
+  would, rather than needing those account-specific identifiers itself.
 - `gmail_app_password` requires 2-Step Verification enabled on the Google
   account to generate (Google Account → Security → App passwords).
 - `cycles_back` controls how many recent meter-read rows are (re-)imported
@@ -104,29 +104,32 @@ caveat that applies to interval-based statistics.
 
 ## First-run debugging
 
-The login URL, billing-history URL, and the initial sign-in form's field IDs
-(`#signInName`/`#password`/`#rememberMe`/`#next`) are confirmed against
-CenterPoint's real Azure AD B2C login page. **Two things are still
-unconfirmed** since they only appear after a real login attempt, and will
-very likely need adjustment on first run:
+The login URL, the sign-in form's field IDs (`#signInName`/`#password`/
+`#rememberMe`/`#next`), and the account-home-to-billing-history navigation
+(click "View Usage", then "View Historical Energy Usage") are all confirmed
+against the real, live CenterPoint site. Login itself is confirmed to
+succeed end-to-end, including `#rememberMe` skipping 2FA on a repeat run.
+**One thing is still unconfirmed:**
 
 - The 2FA-challenge step itself (`_login_with_2fa`'s check for
-  `input[name="verificationCode"]`) -- a placeholder guess, since this page
-  hasn't been observed yet.
-- The 2FA email search (`_search_gmail_for_code`) matches on a generic
-  `SUBJECT "verification"` search term, not a confirmed real subject line or
-  sender address.
+  `input[name="verificationCode"]`) and the 2FA email search
+  (`_search_gmail_for_code`'s generic `SUBJECT "verification"` match) --
+  neither has been exercised yet since this account hasn't hit a 2FA
+  challenge in testing so far.
 
 `scrape_billing_history` looks for a `<table>` whose text includes "Reading
 Date" and "Therms" rather than a guessed CSS selector, which should be
-reasonably resilient to markup details, but also hasn't been tested against
-the real authenticated page yet.
+reasonably resilient to markup details, but also hasn't been reached yet in
+testing.
 
-Check the app's log for where it fails and adjust the corresponding
-selector in `centerpoint-gas.py`.
+If a run fails, check the log -- both `_navigate_to_billing_history` and
+`scrape_billing_history` log the actual page text/links on failure (not
+saved to a file, just to the container log) specifically so a failure here
+is diagnosable without needing a screenshot.
 
 ## Notes
 
 - This app is not affiliated with CenterPoint Energy or Google.
-- Only tested against a single-meter residential account, and (as of this
-  writing) not yet run against the live CenterPoint site.
+- Only tested against a single-meter residential account. Login is confirmed
+  working end-to-end against the live site; the usage-history navigation and
+  table scrape are still being bootstrapped against real runs.

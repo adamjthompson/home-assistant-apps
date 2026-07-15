@@ -73,14 +73,36 @@ def _build_login_url():
     return f"https://login.centerpointenergy.com/{_B2C_TENANT}/{_B2C_POLICY}/oauth2/v2.0/authorize?{urlencode(params)}"
 
 
-def _build_billing_history_url():
-    # MeterNumber/Installation are account-specific but auto-populate once
-    # logged in (confirmed: navigating without them still lands on the right
-    # meter's history for a single-meter account) -- Lob/DefaultLobType/ST
-    # are fixed view-selector params (which utility service to show), not
-    # account-specific, so no per-account config is needed here at all.
-    params = {"Lob": "20", "DefaultLobType": "20", "ST": "Gas"}
-    return f"https://myaccount.centerpointenergy.com/UsageView/UsageHistory?{urlencode(params)}"
+# The billing-history URL needs account-specific MeterNumber/Installation
+# query params that the SPA only resolves through its own client-side
+# account-selection state -- confirmed via a live run that a fresh
+# page.goto() straight to that URL (without those params, bypassing that
+# state entirely) lands on a generic /Error/Index page instead of the real
+# table. So rather than construct that URL ourselves, this replicates the
+# real two-step click-through confirmed against the live site: from account
+# home, click "View Usage" (-> /UsageView/Index?ShowMeterInfo=True&ST=Gas),
+# then "View Historical Energy Usage" (-> the real, fully-populated
+# /UsageView/UsageHistory?MeterNumber=...&Installation=...&Lob=20&... URL).
+_USAGE_NAV_STEPS = ["View Usage", "View Historical Energy Usage"]
+
+
+async def _navigate_to_billing_history(page):
+    for step_text in _USAGE_NAV_STEPS:
+        locator = page.get_by_text(step_text, exact=False)
+        if await locator.count() == 0:
+            body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 2000)")
+            all_links = await page.evaluate(
+                "() => Array.from(document.querySelectorAll('a')).map(a => a.innerText.trim()).filter(Boolean)"
+            )
+            log.error("Could not find the %r link on the current page.", step_text)
+            log.error("Page URL: %s", page.url)
+            log.error("Page body text: %r", body_snippet)
+            log.error("All link texts found: %r", all_links)
+            raise RuntimeError(f"Could not find the {step_text!r} link -- see debug output above")
+
+        log.info("Clicking %r", step_text)
+        await locator.first.click()
+        await page.wait_for_load_state("load")
 
 # `/data` is this add-on's own private persistent volume (unlike `/share`,
 # provisioned automatically with no `map:` entry needed) -- appropriate here
@@ -299,11 +321,10 @@ async def scrape_gas_usage():
         storage_state = SESSION_STATE_PATH if os.path.exists(SESSION_STATE_PATH) else None
         context = await browser.new_context(storage_state=storage_state)
         page = await context.new_page()
-        billing_history_url = _build_billing_history_url()
 
         try:
-            log.info("Navigating to billing history")
-            await page.goto(billing_history_url, wait_until="load")
+            log.info("Navigating to account home")
+            await page.goto(_B2C_REDIRECT_URI, wait_until="load")
 
             if await _needs_login(page):
                 if "login.centerpointenergy.com" not in page.url:
@@ -313,8 +334,9 @@ async def scrape_gas_usage():
                     log.info("Not auto-redirected to login -- navigating there directly")
                     await page.goto(_build_login_url(), wait_until="load")
                 await _login_with_2fa(page)
-                await page.goto(billing_history_url, wait_until="load")
+                await page.goto(_B2C_REDIRECT_URI, wait_until="load")
 
+            await _navigate_to_billing_history(page)
             raw_rows = await scrape_billing_history(page)
             # Re-save after every successful run (login or reused session)
             # so the trust window keeps extending.
