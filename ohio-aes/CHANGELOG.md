@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+
+- Switched the daily gap estimate from a smoothstep (ease-in-out) curve to a straight linear ramp. Smoothstep has zero slope at both endpoints, so on days where the real readings right before/after the gap were already fairly flat, the estimate looked flat for the first third of the gap and then rushed through the rise in the middle third -- a fixed artifact of that curve shape, not a data issue. Linear interpolation spreads the rise evenly across the whole gap instead.
+
 ## 0.2.3
 
 - Added estimation for a daily reporting gap: AES's export consistently pads a multi-hour mid-day window (9:45am-1:45pm on this account) with a literal `0.00` kWh reading instead of a real value -- a residential meter doesn't actually draw zero for hours at a stretch, and `0.00` doesn't appear anywhere else in the export, so this reads as a placeholder rather than real usage. Runs of 1+ hour of exact-zero 15-minute readings, bounded by real readings on both sides, are now estimated with a smoothstep curve between the last real reading before the gap and the first real reading after it, rather than imported as a false zero-usage dip on the Energy Dashboard. Every estimated fill is logged at warning level with the before/after values it curved between (HA's statistics import has no way to flag an entry as estimated). Gaps over 6 hours are left alone rather than estimated, since something that long is more likely a genuine outage than the daily placeholder.

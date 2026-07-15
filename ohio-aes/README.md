@@ -90,11 +90,12 @@ a literal `0.00` kWh reading instead of a real value (for this account,
 consistently 9:45am-1:45pm) -- a residential meter doesn't actually draw
 zero for hours at a stretch, so this is treated as a reporting placeholder,
 not real "no usage" data. Runs of 1+ hour of exact-zero readings, bounded by
-real readings on both sides, are estimated instead: a smooth curve between
-the last real reading before the gap and the first real reading after it,
-rather than importing a false zero-usage dip. This is an estimate, not a
-measurement -- there's no way to flag it as such once imported, so every
-fill is logged (at warning level) with the before/after values it curved
+real readings on both sides, are estimated instead: a straight-line ramp
+between the last real reading before the gap and the first real reading
+after it, rather than importing a false zero-usage dip. This is an
+estimate, not a measurement -- there's no way to flag it as such once
+imported, so every fill is logged (at warning level) with the before/after
+values it ramped
 between. Gaps longer than 6 hours are left alone rather than estimated,
 since something that long is more likely a genuine outage than the usual
 daily placeholder.

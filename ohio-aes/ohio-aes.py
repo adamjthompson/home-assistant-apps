@@ -160,10 +160,6 @@ _SUSPECT_ZERO_RUN = 4
 _MAX_FILLABLE_GAP = timedelta(hours=6)
 
 
-def _smoothstep(t):
-    return t * t * (3 - 2 * t)
-
-
 def _strip_suspect_zero_runs(readings):
     """Un-fill runs of exact-zero readings that look like a reporting
     placeholder rather than real zero usage, so _fill_interval_gaps below
@@ -189,11 +185,11 @@ def _strip_suspect_zero_runs(readings):
 def _fill_interval_gaps(readings):
     """Estimate missing 15-minute readings strictly between two known ones.
 
-    Each missing run is interpolated with a smoothstep (ease-in-out) curve
-    from the last known reading before the gap to the first known reading
-    after it, rather than a straight linear ramp -- these are estimates, not
-    measurements, and HA's import_statistics has no way to flag them as such,
-    so every fill is logged here for anyone auditing the add-on's logs.
+    Each missing run is linearly interpolated between the last known reading
+    before the gap and the first known reading after it -- these are
+    estimates, not measurements, and HA's import_statistics has no way to
+    flag them as such, so every fill is logged here for anyone auditing the
+    add-on's logs.
     """
     if len(readings) < 2:
         return readings
@@ -226,7 +222,7 @@ def _fill_interval_gaps(readings):
         for i in range(1, missing_steps + 1):
             t = i / (missing_steps + 1)
             filled[before + _INTERVAL_STEP * i] = round(
-                before_usage + (after_usage - before_usage) * _smoothstep(t), 3
+                before_usage + (after_usage - before_usage) * t, 3
             )
 
     return filled
