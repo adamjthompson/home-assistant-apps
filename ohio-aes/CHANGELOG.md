@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Fixed flaky "PowerView" click: the "My Usage" dropdown is CSS hover-only and was closing mid-click before Playwright could reach the link, so the automation now opens the known Opower dashboard URL directly in a new tab of the same authenticated browser context instead of hovering/clicking through the nav.
+
 ## 0.1.2
 
 - Fixed post-login navigation: the real AES Ohio dashboard has no "Your Energy Use" link. "My Usage" is a hover-revealed dropdown trigger, and the actual Opower link is "PowerView", which opens in a new tab -- updated the automation to hover the trigger and capture the popup page instead of waiting on the original page to navigate.

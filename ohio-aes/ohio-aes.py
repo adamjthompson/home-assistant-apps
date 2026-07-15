@@ -66,17 +66,15 @@ async def download_usage_export():
             await page.click('input[name="ctl00$MainContent$LoginControl$btnLogin"]')
             await page.wait_for_load_state("networkidle")
 
-            # "My Usage" is a hover-revealed dropdown trigger (not a link itself);
-            # "PowerView" inside it opens Opower's dashboard in a new tab via the
-            # SAML handoff (AES -> Oracle IDCS -> Opower), so we have to hover to
-            # reveal the link and capture the popup as a separate Page.
+            # "PowerView" (the "My Usage" dropdown's link to Opower) opens in a new
+            # tab via the SAML handoff (AES -> Oracle IDCS -> Opower). Its dropdown
+            # is CSS hover-only and closes mid-click before Playwright can reach it,
+            # so rather than fight that we open the known target URL directly in a
+            # new tab in the same (already-authenticated) browser context.
             log.info("Navigating to Your Energy Use")
-            await page.get_by_text("My Usage", exact=True).hover()
-            async with context.expect_page() as new_page_info:
-                await page.get_by_role("link", name="PowerView").click()
-            page = await new_page_info.value
+            page = await context.new_page()
+            await page.goto("http://aeso.opower.com/ei/x/dashboard", wait_until="networkidle")
             await page.wait_for_url(re.compile(r"aeso\.opower\.com"), timeout=45_000)
-            await page.wait_for_load_state("networkidle")
 
             # NOTE: also unconfirmed against the live "Download my data" modal --
             # check /share/ohio_aes_debug.png if this section fails.
