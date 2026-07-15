@@ -30,7 +30,7 @@ import os
 import re
 import secrets
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -376,14 +376,67 @@ def parse_billing_rows(raw_rows):
 # ─── Statistics import ─────────────────────────────────────────────────────────
 
 def compute_statistics_entries(billing_rows, tz):
+    """Spread each cycle's usage evenly across the days between meter reads.
+
+    CenterPoint only ever gives us one cumulative reading per ~30-day cycle,
+    so there's no real information about how usage actually varied within a
+    cycle -- this divides each cycle's total evenly across its days (an
+    estimate, logged as such) so the Energy Dashboard's daily view shows
+    something continuous instead of one spike every ~30 days followed by
+    zeroes. Each day's cumulative `sum` still lands exactly on the real
+    meter reading at the cycle's actual boundary, so weekly/monthly views
+    (which just sum whatever's in range) are unaffected either way.
+
+    The oldest row has no prior reading to anchor a real cycle length
+    against, so it's imported as a single-day entry on its own reading date
+    rather than guessing how long that first cycle ran.
+    """
+    ordered = sorted(billing_rows, key=lambda r: r["date"])
     entries = []
-    for row in sorted(billing_rows, key=lambda r: r["date"]):
-        start = datetime.combine(row["date"], datetime.min.time()).replace(tzinfo=tz)
-        entries.append({
-            "start": start.isoformat(),
-            "state": round(row["therms"] * THERM_TO_KWH, 3),
-            "sum": round(row["meter_reading"] * THERM_TO_KWH, 3),
-        })
+
+    for i, row in enumerate(ordered):
+        cur_date = row["date"]
+        cur_sum_kwh = round(row["meter_reading"] * THERM_TO_KWH, 3)
+
+        if i == 0:
+            start = datetime.combine(cur_date, datetime.min.time()).replace(tzinfo=tz)
+            entries.append({
+                "start": start.isoformat(),
+                "state": round(row["therms"] * THERM_TO_KWH, 3),
+                "sum": cur_sum_kwh,
+            })
+            continue
+
+        prev_date = ordered[i - 1]["date"]
+        prev_sum_kwh = round(ordered[i - 1]["meter_reading"] * THERM_TO_KWH, 3)
+        cycle_days = (cur_date - prev_date).days
+        if cycle_days <= 0:
+            log.warning("Skipping row with non-increasing reading date: %s", cur_date)
+            continue
+
+        daily_kwh = round((cur_sum_kwh - prev_sum_kwh) / cycle_days, 3)
+        log.info(
+            "Spreading %.3f kWh evenly across %d day(s) between %s and %s "
+            "(%.3f kWh/day -- an averaged estimate, not measured daily usage)",
+            cur_sum_kwh - prev_sum_kwh, cycle_days, prev_date, cur_date, daily_kwh,
+        )
+
+        for day_offset in range(1, cycle_days + 1):
+            day = prev_date + timedelta(days=day_offset)
+            start = datetime.combine(day, datetime.min.time()).replace(tzinfo=tz)
+            # Land exactly on the real cumulative reading on the actual
+            # meter-read date, rather than compounding rounding error
+            # across the cycle.
+            day_sum_kwh = (
+                cur_sum_kwh if day_offset == cycle_days
+                else round(prev_sum_kwh + daily_kwh * day_offset, 3)
+            )
+            entries.append({
+                "start": start.isoformat(),
+                "state": daily_kwh,
+                "sum": day_sum_kwh,
+            })
+
     return entries
 
 
@@ -443,15 +496,24 @@ async def main():
         return
 
     # The table has no pagination and shows at most 24 rows already sorted
-    # newest-first, so this just keeps the most recent CYCLES_BACK of
-    # whatever was scraped.
-    billing_rows = sorted(billing_rows, key=lambda r: r["date"], reverse=True)[:CYCLES_BACK]
+    # newest-first. Keep one extra row before the CYCLES_BACK window so the
+    # oldest cycle we care about still has a real prior reading to spread
+    # its days against -- otherwise it would fall back to a single-day
+    # spike for lack of an anchor, same as the very first row always does.
+    billing_rows = sorted(billing_rows, key=lambda r: r["date"])
+    windowed_rows = billing_rows[-(CYCLES_BACK + 1):]
+    has_anchor_row = len(windowed_rows) > CYCLES_BACK
 
     try:
         if not SUPERVISOR_TOKEN:
             raise RuntimeError("SUPERVISOR_TOKEN not set -- is 'homeassistant_api: true' configured?")
         tz = await get_ha_time_zone()
-        entries = compute_statistics_entries(billing_rows, tz)
+        entries = compute_statistics_entries(windowed_rows, tz)
+        if has_anchor_row:
+            # Drop the leading anchor row's own single-day entry -- it only
+            # exists to give the oldest cycle we care about a real prior
+            # reading to spread against, not something we want to submit.
+            entries = entries[1:]
         await import_cycle_statistics(entries)
         log.info(
             "Imported %d billing-cycle statistics entries (%s .. %s)",

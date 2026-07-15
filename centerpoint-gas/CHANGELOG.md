@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- **First fully working end-to-end run against the live site**, confirmed by the user: login, both usage-history navigation clicks, table scrape, and statistics import all succeeded.
+- Changed statistics to spread each cycle's usage evenly across the days between meter reads, instead of dumping the whole cycle's total onto a single day. Previously, since CenterPoint only reports one cumulative reading per ~30-day cycle, the Energy Dashboard's daily view showed one large spike on each reading date and zero on every day in between -- accurate in total, but not useful at daily resolution. Each day's cumulative `sum` still lands exactly on the real meter reading at the cycle's actual boundary (weekly/monthly views, which just sum whatever's in range, are unaffected either way); the per-day split itself is an equal-distribution estimate, logged as such, since there's no real information about how usage actually varied within a cycle. The oldest available row still has no prior reading to anchor a cycle length against, so it's imported as a single-day entry same as before. `cycles_back` now also keeps one extra row beyond the configured window purely as an anchor for the oldest included cycle's spread, dropping that anchor row's own placeholder entry before submitting.
+
 ## 0.1.5
 
 - Confirmed the exact real click-through path to usage history (provided directly): from account home, click "View Usage" (-> `/UsageView/Index?ShowMeterInfo=True&ST=Gas`), then "View Historical Energy Usage" (-> the real, fully-populated `/UsageView/UsageHistory?MeterNumber=...&Installation=...` URL). Replaced the single-guess link-candidate list with this confirmed two-step sequence.
