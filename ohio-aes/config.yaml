@@ -1,6 +1,6 @@
 name: "AES Ohio Energy Usage"
 description: "Logs into AES Ohio (myprofile.aes-ohio.com), downloads your daily electricity usage, and publishes it to Home Assistant via MQTT."
-version: "0.1.7"
+version: "0.1.9"
 slug: "ohio_aes"
 init: false
 arch:
@@ -16,6 +16,7 @@ options:
   mqtt_user: ""
   mqtt_pass: ""
   mqtt_topic: "homeassistant/aes/usage"
+  mqtt_topic_hourly: "homeassistant/aes/usage_hourly"
   days_back: 3
   run_interval_hours: 12
 schema:
@@ -26,6 +27,7 @@ schema:
   mqtt_user: str
   mqtt_pass: password
   mqtt_topic: str
+  mqtt_topic_hourly: str
   days_back: int(1,30)
   run_interval_hours: int(1,24)
 map:

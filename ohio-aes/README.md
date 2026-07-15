@@ -1,7 +1,8 @@
 # AES Ohio Energy Usage — Home Assistant App
 
 Logs into your AES Ohio account (`myprofile.aes-ohio.com`), downloads your
-daily electricity usage, and publishes it to Home Assistant via MQTT.
+electricity usage, and publishes both a daily and an hourly total to Home
+Assistant via MQTT.
 
 ## How it works
 
@@ -21,7 +22,8 @@ drives a real headless Chromium (via Playwright) through the whole login
 and export flow rather than trying to hand-replicate the redirects. Once on
 the usage page, it uses the built-in **Download my data** export (the same
 "Green Button" feature available in the portal UI) to get 15-minute
-interval usage as CSV, sums it to a daily total, and publishes that to MQTT.
+interval usage as CSV, and sums it into both a daily total and an hourly
+total, publishing the most recent of each to MQTT.
 
 ## Installation
 
@@ -40,38 +42,37 @@ mqtt_port: 1883
 mqtt_user: ""
 mqtt_pass: ""
 mqtt_topic: "homeassistant/aes/usage"
+mqtt_topic_hourly: "homeassistant/aes/usage_hourly"
 days_back: 3
 run_interval_hours: 12
 ```
 
 `days_back` controls how many days of usage history are requested on each
 run (a few days of overlap covers AES's data-finalization lag); the app
-always publishes the most recent day it received. `run_interval_hours`
-controls how often it logs in and re-checks — usage data is daily, so there
-is no benefit to running this more than a few times a day.
+always publishes the most recent day (and most recent hour) it received.
+`run_interval_hours` controls how often it logs in and re-checks.
 
-## MQTT payload
+## MQTT payload and sensors
 
-Published (retained) to `mqtt_topic` as JSON:
+Each run publishes retained MQTT Discovery config to
+`homeassistant/sensor/aes_ohio_{daily,hourly}_usage/config`, so Home
+Assistant automatically creates two sensors under an "AES Ohio Energy Usage"
+device -- no manual `configuration.yaml` sensor setup needed:
 
-```json
-{ "date": "2026-07-14", "kwh": 21.436 }
-```
+- **`sensor.aes_ohio_daily_usage`** -- state topic `mqtt_topic`:
+  ```json
+  { "date": "2026-07-14", "kwh": 21.436 }
+  ```
+- **`sensor.aes_ohio_hourly_usage`** -- state topic `mqtt_topic_hourly`, for
+  the most recent complete hour in the export:
+  ```json
+  { "hour": "2026-07-14T13:00:00", "kwh": 1.436 }
+  ```
 
-Wire it to an MQTT sensor in Home Assistant, e.g.:
-
-```yaml
-mqtt:
-  sensor:
-    - name: "AES Ohio Daily Usage"
-      state_topic: "homeassistant/aes/usage"
-      value_template: "{{ value_json.kwh }}"
-      unit_of_measurement: "kWh"
-      device_class: energy
-      state_class: total
-      json_attributes_topic: "homeassistant/aes/usage"
-      json_attributes_template: "{{ {'date': value_json.date} | tojson }}"
-```
+Discovery assumes the default `homeassistant` discovery prefix; if you've
+customized your MQTT integration's discovery prefix, the sensors won't be
+picked up automatically and you'd need to publish equivalent sensor YAML
+yourself using the state topics above.
 
 ## First-run debugging
 

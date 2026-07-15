@@ -36,7 +36,10 @@ MQTT_PORT = int(os.environ.get("MQTT_PORT", 1883))
 MQTT_USER = os.environ.get("MQTT_USER", "") or None
 MQTT_PASS = os.environ.get("MQTT_PASS", "") or None
 MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "homeassistant/aes/usage")
+MQTT_TOPIC_HOURLY = os.environ.get("MQTT_TOPIC_HOURLY", "homeassistant/aes/usage_hourly")
 DAYS_BACK = int(os.environ.get("DAYS_BACK", 3))
+
+MQTT_DISCOVERY_PREFIX = "homeassistant"
 
 CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "/usr/bin/chromium-browser")
 DEBUG_SCREENSHOT = "/share/ohio_aes_debug.png"
@@ -119,6 +122,22 @@ async def download_usage_export():
 
 # ─── CSV parsing ───────────────────────────────────────────────────────────────
 
+# The export's DATE column format has been observed as both "7/11/26" and
+# "2026-07-13" across runs -- likely a locale difference between the
+# container's headless Chromium and a regular browser -- so hourly bucketing
+# parses defensively against either rather than assuming one.
+_EXPORT_DATE_FORMATS = ("%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d")
+
+
+def _parse_export_date(date_str):
+    for fmt in _EXPORT_DATE_FORMATS:
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"Unrecognized export DATE format: {date_str!r}")
+
+
 def parse_daily_totals(zip_path):
     with zipfile.ZipFile(zip_path) as z:
         csv_name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
@@ -141,7 +160,92 @@ def parse_daily_totals(zip_path):
     return daily_totals
 
 
+def parse_hourly_totals(zip_path):
+    with zipfile.ZipFile(zip_path) as z:
+        csv_name = next(n for n in z.namelist() if n.lower().endswith(".csv"))
+        raw = z.read(csv_name).decode("utf-8-sig")
+
+    lines = raw.splitlines()
+    header_idx = next(i for i, line in enumerate(lines) if line.startswith("TYPE,DATE"))
+    reader = csv.DictReader(lines[header_idx:])
+
+    hourly_totals = {}
+    for row in reader:
+        if row.get("TYPE") != "Electric usage":
+            continue
+        start_time = row.get("START TIME")
+        if not start_time:
+            continue
+        date = _parse_export_date(row["DATE"])
+        hour = int(start_time.split(":")[0])
+        bucket = f"{date.isoformat()}T{hour:02d}:00:00"
+        usage = float(row["USAGE (kWh)"] or 0)
+        hourly_totals[bucket] = hourly_totals.get(bucket, 0.0) + usage
+
+    return hourly_totals
+
+
 # ─── MQTT publish ──────────────────────────────────────────────────────────────
+
+def _mqtt_auth():
+    return {"username": MQTT_USER, "password": MQTT_PASS} if MQTT_USER else None
+
+
+def _mqtt_publish(topic, payload):
+    mqtt_publish.single(
+        topic,
+        payload=json.dumps(payload),
+        retain=True,
+        hostname=MQTT_HOST,
+        port=MQTT_PORT,
+        auth=_mqtt_auth(),
+    )
+
+
+def publish_discovery_configs():
+    # Without this, the state topics below are just bare MQTT messages -- Home
+    # Assistant has no entity to attach them to unless the user hand-writes
+    # sensor YAML. Publishing retained discovery configs makes the sensors
+    # appear automatically (standard HA MQTT discovery convention).
+    device = {
+        "identifiers": ["aes_ohio"],
+        "name": "AES Ohio Energy Usage",
+        "manufacturer": "AES Ohio",
+    }
+    sensors = {
+        "aes_ohio_daily_usage": {
+            "name": "AES Ohio Daily Usage",
+            "unique_id": "aes_ohio_daily_usage",
+            "object_id": "aes_ohio_daily_usage",
+            "state_topic": MQTT_TOPIC,
+            "value_template": "{{ value_json.kwh }}",
+            "unit_of_measurement": "kWh",
+            "device_class": "energy",
+            "state_class": "total",
+            "json_attributes_topic": MQTT_TOPIC,
+            "json_attributes_template": "{{ {'date': value_json.date} | tojson }}",
+            "device": device,
+        },
+        "aes_ohio_hourly_usage": {
+            "name": "AES Ohio Hourly Usage",
+            "unique_id": "aes_ohio_hourly_usage",
+            "object_id": "aes_ohio_hourly_usage",
+            "state_topic": MQTT_TOPIC_HOURLY,
+            "value_template": "{{ value_json.kwh }}",
+            "unit_of_measurement": "kWh",
+            "device_class": "energy",
+            "state_class": "total",
+            "json_attributes_topic": MQTT_TOPIC_HOURLY,
+            "json_attributes_template": "{{ {'hour': value_json.hour} | tojson }}",
+            "device": device,
+        },
+    }
+
+    for object_id, config in sensors.items():
+        _mqtt_publish(f"{MQTT_DISCOVERY_PREFIX}/sensor/{object_id}/config", config)
+
+    log.info("Published MQTT discovery config for daily/hourly sensors")
+
 
 def publish_to_mqtt(daily_totals):
     if not daily_totals:
@@ -151,26 +255,29 @@ def publish_to_mqtt(daily_totals):
     latest_date = max(daily_totals)
     latest_kwh = round(daily_totals[latest_date], 3)
     log.info("Publishing %s kWh for %s to %s", latest_kwh, latest_date, MQTT_TOPIC)
+    _mqtt_publish(MQTT_TOPIC, {"date": latest_date, "kwh": latest_kwh})
 
-    payload = json.dumps({"date": latest_date, "kwh": latest_kwh})
-    auth = {"username": MQTT_USER, "password": MQTT_PASS} if MQTT_USER else None
 
-    mqtt_publish.single(
-        MQTT_TOPIC,
-        payload=payload,
-        retain=True,
-        hostname=MQTT_HOST,
-        port=MQTT_PORT,
-        auth=auth,
-    )
+def publish_hourly_to_mqtt(hourly_totals):
+    if not hourly_totals:
+        log.warning("No hourly usage data parsed, nothing to publish")
+        return
+
+    latest_hour = max(hourly_totals)
+    latest_kwh = round(hourly_totals[latest_hour], 3)
+    log.info("Publishing %s kWh for hour %s to %s", latest_kwh, latest_hour, MQTT_TOPIC_HOURLY)
+    _mqtt_publish(MQTT_TOPIC_HOURLY, {"hour": latest_hour, "kwh": latest_kwh})
 
 
 # ─── Entry point ───────────────────────────────────────────────────────────────
 
 async def main():
+    publish_discovery_configs()
     zip_path = await download_usage_export()
     daily_totals = parse_daily_totals(zip_path)
     publish_to_mqtt(daily_totals)
+    hourly_totals = parse_hourly_totals(zip_path)
+    publish_hourly_to_mqtt(hourly_totals)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.9
+
+- Added MQTT Discovery: the app now publishes retained discovery config for both the daily and hourly usage sensors on every run, so Home Assistant creates them automatically under an "AES Ohio Energy Usage" device instead of requiring the user to hand-write sensor YAML.
+
+## 0.1.8
+
+- Added an hourly usage sensor: the 15-minute interval rows in the export are now also bucketed and summed per hour, with the most recent complete hour published (retained) to a new `mqtt_topic_hourly` topic alongside the existing daily total.
+
 ## 0.1.3
 
 - Fixed flaky "PowerView" click: the "My Usage" dropdown is CSS hover-only and was closing mid-click before Playwright could reach the link, so the automation now opens the known Opower dashboard URL directly in a new tab of the same authenticated browser context instead of hovering/clicking through the nav.
