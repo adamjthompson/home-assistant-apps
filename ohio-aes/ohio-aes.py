@@ -88,8 +88,12 @@ async def download_usage_export():
 
             end_date = datetime.now().date() - timedelta(days=1)
             start_date = end_date - timedelta(days=DAYS_BACK - 1)
-            await page.get_by_label("From").fill(start_date.strftime("%m/%d/%Y"))
-            await page.get_by_label("To").fill(end_date.strftime("%m/%d/%Y"))
+            # get_by_label("From"/"To") is ambiguous here: these inputs' aria-label
+            # ("select-date-to - Enter end date...") overrides the wrapping "To"
+            # label text for accessible-name purposes, and "To" also substring-
+            # matches unrelated elements (e.g. "Scroll to next bill range").
+            await page.locator("#date-selector--select-date-from").fill(start_date.strftime("%m/%d/%Y"))
+            await page.locator("#date-selector--select-date-to").fill(end_date.strftime("%m/%d/%Y"))
             await page.get_by_text("CSV", exact=True).click()
 
             log.info("Requesting export for %s to %s", start_date, end_date)
