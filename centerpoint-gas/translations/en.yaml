@@ -1,0 +1,25 @@
+configuration:
+  centerpoint_username:
+    name: CenterPoint Username
+    description: "Your CenterPoint Energy account login username."
+  centerpoint_password:
+    name: CenterPoint Password
+    description: "Your CenterPoint Energy account login password."
+  centerpoint_meter_number:
+    name: Meter Number
+    description: "Your gas meter number, found in the billing-history page's URL (MeterNumber= query parameter) after logging into myaccount.centerpointenergy.com."
+  centerpoint_installation_id:
+    name: Installation ID
+    description: "Your installation ID, found in the billing-history page's URL (Installation= query parameter) after logging into myaccount.centerpointenergy.com."
+  gmail_address:
+    name: Gmail Address
+    description: "The Gmail address that receives CenterPoint's 2FA verification-code emails."
+  gmail_app_password:
+    name: Gmail App Password
+    description: "A Gmail app password (not your regular Google password) used to read the 2FA code via IMAP when CenterPoint challenges a login. Requires 2-Step Verification enabled on the Google account to generate one. Note: this grants read access to the entire mailbox, not just CenterPoint's emails -- a dedicated Gmail account used only for utility 2FA mail is a stronger isolation option if you'd prefer not to grant access to your everyday inbox."
+  cycles_back:
+    name: Billing Cycles Back
+    description: "How many recent meter-read cycles to import each run. The billing-history table shows at most 24, so anything higher just imports everything available."
+  run_interval_hours:
+    name: Run Interval (hours)
+    description: "How often to check for a new billing-history row. A new reading only ever appears once per meter-read cycle (roughly every 28-33 days), so there's no benefit running this frequently -- frequent runs just risk unnecessary logins."
