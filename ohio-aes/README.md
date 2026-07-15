@@ -100,14 +100,9 @@ The login form fields are confirmed against the live site, but the
 "Your Energy Use" navigation link and the "Download my data" modal
 (date fields, CSV selection, Export button) were mapped from screenshots,
 not live selector inspection — they're the most likely spot to need a
-small tweak. If a run fails, the app saves a full-page screenshot and the
-page's HTML to the Home Assistant `share` folder:
-
-- `/share/ohio_aes_debug.png`
-- `/share/ohio_aes_debug.html`
-
-Check the app's log for where it failed, look at the screenshot, and adjust
-the corresponding `page.get_by_...` selector in `ohio-aes.py`.
+small tweak. If a run fails, check the app's log for where it failed and
+adjust the corresponding `page.locator`/`page.get_by_...` selector in
+`ohio-aes.py`.
 
 If only the statistics-import step fails (the log will say so, but the run
 overall won't be marked failed), that's most often a temporary HA API/token

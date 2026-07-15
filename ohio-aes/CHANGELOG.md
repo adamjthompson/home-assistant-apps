@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Removed the on-failure debug screenshot/HTML dump (`/share/ohio_aes_debug.png`, `/share/ohio_aes_debug.html`). It was only ever needed to map selectors against the live site during initial development; now that the automation flow is confirmed stable, a failed run just logs and re-raises the exception.
+
 ## 0.2.0
 
 - Replaced MQTT publishing with direct Home Assistant long-term statistics import: MQTT state changes are timestamped at message-arrival time regardless of any date/hour embedded in the payload, so usage was showing up on charts dated to whenever the app happened to run rather than the day/hour it actually occurred (compounded by AES's 1-2 day data-finalization lag). Hourly totals are now imported via `recorder/import_statistics` as an external statistic (`ohio_aes:hourly_usage`), correctly dated and ready to add as an Energy Dashboard source. This removes the MQTT broker dependency and all `mqtt_*` config options entirely, and adds `homeassistant_api: true` so the app can call HA's own API (no manual token needed). Breaking change for anyone who had wired the old `mqtt_topic`/`mqtt_topic_hourly` topics into their own dashboards or automations.

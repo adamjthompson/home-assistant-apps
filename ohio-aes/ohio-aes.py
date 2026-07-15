@@ -37,8 +37,6 @@ AES_PASSWORD = os.environ["AES_PASSWORD"]
 DAYS_BACK = int(os.environ.get("DAYS_BACK", 3))
 
 CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "/usr/bin/chromium-browser")
-DEBUG_SCREENSHOT = "/share/ohio_aes_debug.png"
-DEBUG_HTML = "/share/ohio_aes_debug.html"
 DOWNLOAD_PATH = "/tmp/ohio_aes_export.zip"
 
 LOGIN_URL = "https://myprofile.aes-ohio.com/Profile/Login.aspx"
@@ -113,13 +111,7 @@ async def download_usage_export():
             await download.save_as(DOWNLOAD_PATH)
 
         except Exception:
-            log.exception("Automation failed -- saving debug screenshot and HTML to /share")
-            try:
-                await page.screenshot(path=DEBUG_SCREENSHOT, full_page=True)
-                with open(DEBUG_HTML, "w") as f:
-                    f.write(await page.content())
-            except Exception:
-                log.exception("Could not save debug artifacts")
+            log.exception("Automation failed")
             raise
         finally:
             await browser.close()
