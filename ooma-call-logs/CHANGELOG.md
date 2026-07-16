@@ -3,6 +3,7 @@
 ## 0.2.1
 
 - Fixed a real bug found via a live run against a real FlareSolverr instance: the very first `sessions.destroy` call failed with a 500 (no prior `ooma_session` existed yet to destroy), which was treated as fatal and aborted the whole run. The original Node-RED flow never actually checked this step's result at all -- it unconditionally moved on to create a fresh session regardless of what destroy returned. `destroy_session` now matches that tolerant behavior: failures are logged and swallowed rather than raised, since "nothing to destroy yet" is an expected, harmless condition (especially on first run), not a real failure. Also improved `flaresolverr_command` to include the actual response body in its error message on a non-200 status, rather than relying on aiohttp's generic exception text.
+- **Confirmed working end-to-end on this same version**, immediately after the fix above: login, call-log fetch, HTML parsing, and the `sensor.ooma_call_feed` update all succeeded against the live site on the very next run (10 calls found).
 
 ## 0.2.0
 

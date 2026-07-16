@@ -99,26 +99,25 @@ Node-RED flow once this add-on is confirmed working; your existing card
 
 ## First-run debugging
 
-**Confirmed via live runs, and why bundling FlareSolverr was abandoned:**
-Chromium repeatedly failed inside the bundled container
-(`session not created: cannot connect to chrome... chrome not reachable`),
-even after fixing an initial root-vs-non-root permission issue. Research
-turned up a real, currently-unresolved upstream issue on another community
-Home Assistant add-on hitting this exact same error with no confirmed fix
-(abandoned, not resolved). Rather than keep chasing an upstream bug with no
-known fix, this add-on now depends on a separately-run FlareSolverr instance
-instead -- see "Prerequisites" above.
+**Confirmed working end-to-end against the live site** (login, call-log
+fetch, parsing, and the `sensor.ooma_call_feed` update via the Supervisor
+API all succeeded on a real run). Two things worth knowing about how it got
+there:
 
-**Still real, unverified pieces**, since this hasn't been run end-to-end
-against the live site yet in its current (non-bundled) form:
-
-- The regex-based call-log table parser (`parse_call_logs_html`) is a
-  direct, unit-tested port of the original flow's logic, but has only been
-  tested against a synthetic HTML sample built to match the original flow's
-  described structure -- not a real captured page. If parsing comes back
-  empty against the live site, share a sample of the real
-  `/phone/call_logs` HTML (with your own numbers/names redacted) so the
-  regexes can be corrected.
+- **Why bundling FlareSolverr was abandoned:** an earlier version of this
+  add-on tried bundling FlareSolverr in the same container. Chromium
+  repeatedly failed to start (`session not created: cannot connect to
+  chrome... chrome not reachable`), even after fixing an initial
+  root-vs-non-root permission issue. Research turned up a real,
+  currently-unresolved upstream issue on another community Home Assistant
+  add-on hitting this exact same error with no confirmed fix (abandoned,
+  not resolved) -- so this add-on depends on a separately-run FlareSolverr
+  instance instead (see "Prerequisites" above), which is also what actually
+  ended up working.
+- **The first `sessions.destroy` call on a fresh FlareSolverr instance
+  returns a 500** ("The session doesn't exist") -- expected and harmless,
+  logged and ignored rather than treated as fatal, matching the original
+  Node-RED flow's behavior of never checking that step's result at all.
 
 **A known future risk, not a current problem:** community sources report
 FlareSolverr is losing effectiveness against Cloudflare's newer Turnstile/
@@ -133,5 +132,5 @@ preemptively.
 ## Notes
 
 - This app is not affiliated with Ooma, Cloudflare, or the FlareSolverr project.
-- Only tested against a single Ooma account. Not yet run end-to-end against
-  the live site in its current form -- see "First-run debugging" above.
+- Only tested against a single Ooma account, with a single FlareSolverr
+  instance running elsewhere on the network -- confirmed working end-to-end.
