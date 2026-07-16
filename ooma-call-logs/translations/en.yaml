@@ -1,0 +1,10 @@
+configuration:
+  ooma_username:
+    name: Ooma Username
+    description: "Your my.ooma.com account login username."
+  ooma_password:
+    name: Ooma Password
+    description: "Your my.ooma.com account login password."
+  run_interval_minutes:
+    name: Run Interval (minutes)
+    description: "How often to check for new call-log entries. Each run destroys and recreates a FlareSolverr browser session, which has a real, ongoing CPU/RAM cost (a full patched Chromium instance) -- consider a longer interval on constrained hardware."
