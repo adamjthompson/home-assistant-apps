@@ -82,20 +82,20 @@ Node-RED flow once this add-on is confirmed working; your existing card
 
 ## First-run debugging
 
-**This add-on has real, unverified pieces** -- ported and unit-tested
-against synthetic data matching the original flow's logic, but not yet run
-against the live site or a real container build:
+**Confirmed via a live run and fixed:** the container failed to start
+Chromium (`session not created: cannot connect to chrome... chrome not
+reachable`). Root cause: the Dockerfile's `USER root` was never reverted, so
+the whole container ran as root -- FlareSolverr's own Dockerfile
+deliberately ends as a non-root `flaresolverr` user specifically because
+Chromium crashes as root without additional sandboxing it doesn't set up.
+Fixed by restoring `USER flaresolverr` (with a `chown` on the files this
+add-on adds) before `CMD`, matching FlareSolverr's own Dockerfile pattern
+exactly. If Chromium still fails to start after this fix, check for other
+root-vs-non-root permission issues first (e.g. anything else writing into
+`/app` at runtime) before assuming it's a deeper Chromium/sandboxing problem.
 
-- **FlareSolverr running as a background process alongside this add-on's
-  own script, in one container, has not been tested.** FlareSolverr is
-  normally one process per container; this bundles it with a second
-  process via `start.sh`. If the container fails to start or FlareSolverr
-  never reports ready, check the log for `start.sh`'s output first --
-  the fallback, if this specific combination turns out not to work
-  cleanly, is running FlareSolverr as its own lightweight sidecar process
-  still launched from this same add-on (still one installable unit from an
-  end user's perspective), rather than assuming this exact packaging.
-  Health is checked via FlareSolverr's real `GET /health` endpoint.
+**Still real, unverified pieces:**
+
 - The regex-based call-log table parser (`parse_call_logs_html`) is a
   direct, unit-tested port of the original flow's logic, but has only been
   tested against a synthetic HTML sample built to match the original flow's

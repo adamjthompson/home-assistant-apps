@@ -20,6 +20,15 @@ FROM $BUILD_FROM
 # container setup) is a novel combination for this project -- verify it
 # actually starts and stays healthy when first built; see start.sh and the
 # README's "First-run debugging" section.
+#
+# FlareSolverr's own Dockerfile deliberately ends as a non-root `flaresolverr`
+# user (created via `useradd`, with /app chowned to it) -- its own comments
+# note Chromium crashes ("*** stack smashing detected ***") when run as root
+# without additional sandboxing setup it doesn't do. `USER root` below is
+# only for the install/copy steps that need it, mirroring their own
+# Dockerfile's pattern exactly: switch to root, do root-requiring work,
+# chown what was added, then switch back to `flaresolverr` before CMD so the
+# actual running container matches the non-root context FlareSolverr expects.
 
 USER root
 
@@ -30,6 +39,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ooma-call-logs.py .
 COPY start.sh .
-RUN chmod +x start.sh
+RUN chmod +x start.sh && chown -R flaresolverr:flaresolverr /app
+
+USER flaresolverr
 
 CMD ["/app/start.sh"]
