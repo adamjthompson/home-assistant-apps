@@ -2,19 +2,25 @@
 
 Logs into your Ooma account, reads your recent call log, and updates a
 Home Assistant sensor directly -- no separate Node-RED flow, no
-separately-run Cloudflare-bypass proxy, no hand-written MQTT template
-sensor. Ported from a working Node-RED flow; see "How it works" below for
-what changed and why.
+hand-written MQTT template sensor. Ported from a working Node-RED flow; see
+"How it works" below for what changed and why.
 
 ## How it works
 
 Ooma's customer portal (`my.ooma.com`) sits behind Cloudflare, so a plain
 HTTP client (or even a plain headless browser) gets blocked before ever
-reaching the login page. This add-on bundles
-[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) (MIT licensed)
--- a proxy that drives a specially-patched Chromium to solve Cloudflare's
-challenge -- in the same container, rather than requiring it as a separate
-service you'd have to stand up yourself.
+reaching the login page. This add-on talks to
+[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) -- a proxy that
+drives a specially-patched Chromium to solve Cloudflare's challenge -- to
+get past that, the same way the original Node-RED flow did.
+
+**This add-on does not bundle or run FlareSolverr itself -- you point it at
+an existing FlareSolverr instance you already run** (`flaresolverr_url`).
+Bundling it in this same container was tried and reverted: it hit a real,
+unresolved upstream "chrome not reachable" bug (see CHANGELOG 0.2.0), and
+even setting that aside, bundling risked anyone who already runs
+FlareSolverr (as this project's own author does) ending up with two
+redundant instances running for no reason.
 
 Only the *first* step (fetching the login page) goes through FlareSolverr:
 
@@ -39,6 +45,14 @@ template sensor exactly (`state` = last-updated timestamp, `attributes.calls`
 /`count`/`status`) and reuses the same entity ID, so an existing dashboard
 card built against that sensor keeps working with zero changes.
 
+## Prerequisites
+
+**You need a FlareSolverr instance already running somewhere reachable from
+Home Assistant** -- this add-on is just a client, not a FlareSolverr
+install. If you don't already have one, options include a standalone
+`docker run flaresolverr/flaresolverr` on any machine on your network, or a
+community Home Assistant add-on that bundles it.
+
 ## Installation
 
 1. In Home Assistant, go to **Settings → Apps → Install App**
@@ -55,15 +69,18 @@ token or MQTT broker needed.
 ```yaml
 ooma_username: "your-ooma-username"
 ooma_password: "your-ooma-password"
+flaresolverr_url: "http://192.168.1.30:8191"
 run_interval_minutes: 15
 ```
 
+- `flaresolverr_url` is the base URL of your existing FlareSolverr instance
+  (no trailing path needed -- `/v1` is appended automatically).
 - `run_interval_minutes` defaults to match the original flow's 15-minute
   cadence, but each run destroys and recreates a FlareSolverr session --
-  meaning a full patched-Chromium instance spins up every run. That's a
-  real, ongoing CPU/RAM cost (roughly 300-500MB+ per session), worth tuning
-  down on constrained hardware (e.g. a Raspberry Pi) if 15 minutes turns out
-  to be too frequent for your setup.
+  meaning a full patched-Chromium instance spins up every run on *your*
+  FlareSolverr host. That's a real, ongoing CPU/RAM cost (roughly
+  300-500MB+ per session), worth tuning down if 15 minutes turns out to be
+  too frequent for that host's hardware.
 
 ## Home Assistant sensor
 
@@ -82,19 +99,18 @@ Node-RED flow once this add-on is confirmed working; your existing card
 
 ## First-run debugging
 
-**Confirmed via a live run and fixed:** the container failed to start
-Chromium (`session not created: cannot connect to chrome... chrome not
-reachable`). Root cause: the Dockerfile's `USER root` was never reverted, so
-the whole container ran as root -- FlareSolverr's own Dockerfile
-deliberately ends as a non-root `flaresolverr` user specifically because
-Chromium crashes as root without additional sandboxing it doesn't set up.
-Fixed by restoring `USER flaresolverr` (with a `chown` on the files this
-add-on adds) before `CMD`, matching FlareSolverr's own Dockerfile pattern
-exactly. If Chromium still fails to start after this fix, check for other
-root-vs-non-root permission issues first (e.g. anything else writing into
-`/app` at runtime) before assuming it's a deeper Chromium/sandboxing problem.
+**Confirmed via live runs, and why bundling FlareSolverr was abandoned:**
+Chromium repeatedly failed inside the bundled container
+(`session not created: cannot connect to chrome... chrome not reachable`),
+even after fixing an initial root-vs-non-root permission issue. Research
+turned up a real, currently-unresolved upstream issue on another community
+Home Assistant add-on hitting this exact same error with no confirmed fix
+(abandoned, not resolved). Rather than keep chasing an upstream bug with no
+known fix, this add-on now depends on a separately-run FlareSolverr instance
+instead -- see "Prerequisites" above.
 
-**Still real, unverified pieces:**
+**Still real, unverified pieces**, since this hasn't been run end-to-end
+against the live site yet in its current (non-bundled) form:
 
 - The regex-based call-log table parser (`parse_call_logs_html`) is a
   direct, unit-tested port of the original flow's logic, but has only been
@@ -103,11 +119,6 @@ root-vs-non-root permission issues first (e.g. anything else writing into
   empty against the live site, share a sample of the real
   `/phone/call_logs` HTML (with your own numbers/names redacted) so the
   regexes can be corrected.
-- The multi-arch build (basing the Dockerfile on FlareSolverr's own
-  published multi-arch image via `build.yaml`, rather than an HA base
-  image) is a different pattern than `ohio-aes`/`centerpoint-gas` use --
-  worth confirming it actually builds correctly for both `amd64` and
-  `aarch64` the first time this add-on is built.
 
 **A known future risk, not a current problem:** community sources report
 FlareSolverr is losing effectiveness against Cloudflare's newer Turnstile/
@@ -122,6 +133,5 @@ preemptively.
 ## Notes
 
 - This app is not affiliated with Ooma, Cloudflare, or the FlareSolverr project.
-- FlareSolverr is bundled under its MIT license.
 - Only tested against a single Ooma account. Not yet run end-to-end against
-  the live site -- see "First-run debugging" above.
+  the live site in its current form -- see "First-run debugging" above.

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 Ooma Call Logs
-Logs into Ooma's customer portal (behind Cloudflare) via a FlareSolverr
-instance bundled in this same container, reads the recent call log, and
-updates a Home Assistant sensor directly via the Supervisor API.
+Logs into Ooma's customer portal (behind Cloudflare) via a separately-run
+FlareSolverr instance (yours, or any other -- configured via
+FLARESOLVERR_URL), reads the recent call log, and updates a Home Assistant
+sensor directly via the Supervisor API.
 
 Ported from a working Node-RED flow -- the login/scrape logic (FlareSolverr
 session handling, CSRF-token extraction, native POST login, HTML table
@@ -13,19 +14,21 @@ original flow's design, since spinning up a full browser session has real
 cost); the POST login and GET call-logs are direct aiohttp calls reusing the
 resulting cookies.
 
-This add-on is not based on an HA base image (unlike ohio-aes/
-centerpoint-gas) -- it's based on FlareSolverr's own published image, so
-there's no bashio/s6-overlay here. Config is read directly from
-/data/options.json (the same file bashio itself just wraps), and this
-process itself loops on run_interval_minutes rather than being re-invoked by
-a bash loop (see start.sh).
+Bundling FlareSolverr in this same container was tried and reverted -- it
+hit a real, unresolved upstream "chrome not reachable" bug (see CHANGELOG
+0.2.0) with no confirmed fix, and even if it had worked, bundling would
+have risked users ending up with two redundant FlareSolverr instances if
+they already run one. This add-on is a standard ohio-aes/centerpoint-gas-
+style bashio-based add-on again: config comes from env vars set by run.sh
+via bashio::config, and this script runs once per invocation (the bash loop
+in run.sh handles repetition on run_interval_minutes).
 """
 
 import asyncio
-import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -37,18 +40,12 @@ log = logging.getLogger("ooma_call_logs")
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-OPTIONS_PATH = "/data/options.json"
+OOMA_USERNAME = os.environ["OOMA_USERNAME"]
+OOMA_PASSWORD = os.environ["OOMA_PASSWORD"]
 
-
-def load_options():
-    with open(OPTIONS_PATH) as f:
-        return json.load(f)
-
-
-# FlareSolverr is bundled in this same container (see Dockerfile/start.sh),
-# reachable on localhost rather than the external host the original Node-RED
-# flow pointed at.
-FLARESOLVERR_URL = "http://localhost:8191/v1"
+# Points at a separately-run FlareSolverr instance -- yours, or any other.
+# Not bundled in this container (see module docstring).
+FLARESOLVERR_URL = os.environ["FLARESOLVERR_URL"].rstrip("/") + "/v1"
 SESSION_ID = "ooma_session"
 
 LOGIN_URL = "https://my.ooma.com/login"
@@ -245,10 +242,7 @@ async def update_ha_sensor(session, result, tz):
 
 # ─── Entry point ───────────────────────────────────────────────────────────────
 
-async def run_once(options):
-    username = options["ooma_username"]
-    password = options["ooma_password"]
-
+async def main():
     async with aiohttp.ClientSession() as session:
         log.info("Purging any existing FlareSolverr session")
         await destroy_session(session)
@@ -271,7 +265,7 @@ async def run_once(options):
 
         log.info("Logging in natively")
         session_cookie = await native_post_login(
-            session, csrf_token, cookie_str, user_agent, username, password
+            session, csrf_token, cookie_str, user_agent, OOMA_USERNAME, OOMA_PASSWORD
         )
 
         if "_myooma2_session" in cookie_str:
@@ -293,17 +287,9 @@ async def run_once(options):
         )
 
 
-async def main():
-    options = load_options()
-    interval_seconds = options.get("run_interval_minutes", 15) * 60
-
-    while True:
-        try:
-            await run_once(options)
-        except Exception:
-            log.exception("Run failed -- will retry next interval")
-        await asyncio.sleep(interval_seconds)
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception:
+        log.exception("Run failed")
+        sys.exit(1)
