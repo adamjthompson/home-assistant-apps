@@ -1,6 +1,6 @@
 name: "Ooma Call Logs"
 description: "Logs into Ooma via your own FlareSolverr instance, reads your recent call log, and updates a Home Assistant sensor directly."
-version: "0.2.0"
+version: "0.2.1"
 slug: "ooma_call_logs"
 init: false
 arch:

@@ -25,6 +25,7 @@ in run.sh handles repetition on run_interval_minutes).
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -67,12 +68,22 @@ async def flaresolverr_command(session, payload):
     async with session.post(
         FLARESOLVERR_URL, json=payload, timeout=aiohttp.ClientTimeout(total=70)
     ) as resp:
-        resp.raise_for_status()
-        return await resp.json()
+        text = await resp.text()
+        if resp.status != 200:
+            raise RuntimeError(f"FlareSolverr returned {resp.status}: {text}")
+        return json.loads(text)
 
 
 async def destroy_session(session):
-    await flaresolverr_command(session, {"cmd": "sessions.destroy", "session": SESSION_ID})
+    # The original Node-RED flow never checked this step's result either --
+    # it unconditionally moved on to create a fresh session regardless.
+    # FlareSolverr errors if asked to destroy a session that doesn't exist
+    # (e.g. this add-on's very first run), which is an expected, harmless
+    # condition, not a real failure -- don't let it block session creation.
+    try:
+        await flaresolverr_command(session, {"cmd": "sessions.destroy", "session": SESSION_ID})
+    except Exception as e:
+        log.info("Ignoring sessions.destroy failure (probably no prior session to destroy): %s", e)
 
 
 async def create_session(session):
