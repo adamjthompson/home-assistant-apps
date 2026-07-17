@@ -16,11 +16,6 @@ get past that, the same way the original Node-RED flow did.
 
 **This add-on does not bundle or run FlareSolverr itself -- you point it at
 an existing FlareSolverr instance you already run** (`flaresolverr_url`).
-Bundling it in this same container was tried and reverted: it hit a real,
-unresolved upstream "chrome not reachable" bug (see CHANGELOG 0.2.0), and
-even setting that aside, bundling risked anyone who already runs
-FlareSolverr (as this project's own author does) ending up with two
-redundant instances running for no reason.
 
 Only the *first* step (fetching the login page) goes through FlareSolverr:
 
@@ -92,34 +87,77 @@ Each run updates `sensor.ooma_call_feed` directly:
 - `attributes.count`: number of calls found
 - `attributes.status`: `"success"` / `"empty_table"` / `"error"`
 
-If you're migrating from the original Node-RED flow + template sensor, no
-dashboard changes are needed -- just remove the old template sensor YAML and
-Node-RED flow once this add-on is confirmed working; your existing card
-(entity ID `sensor.ooma_call_feed`) keeps working as-is.
+## Dashboard display
+To display the call logs on your dashboard, one solution is to use a markdown card. *Note: Requires that `card_mod` is installed also.*
 
-## First-run debugging
+```yaml
+type: markdown
+icon: mdi:phone-log
+content: >-
+  {% set calls = state_attr('sensor.ooma_call_feed', 'calls') %}  {% if calls !=
+  None and calls | length > 0 %}  <table>  {% for call in calls %}  <tr>  <td
+  style="padding: 10px; width: 40%;"><a href="#{{ call.type }}">{{ call.name
+  }}</a></td>  <td style="padding: 10px; width: 25%;"><a href="#number">{{
+  call.number }}</a></td>  <td style="padding: 10px; width: 20%;">{{ call.date
+  }}</td>  <td style="padding: 10px; width: 15%; text-align: right;">{{
+  call.duration }}</td>  </tr>  {% endfor %}  </table>  {% else %}  *No recent
+  calls found.*  {% endif %}
+card_mod:
+  style:
+    ha-markdown:
+      $: |
+        /* Force the table to span edge-to-edge */
+        table {
+          width: 100% !important;
+          display: table !important;
+          border-collapse: collapse !important;
+          border: none !important;
+        }
+        /* Remove default boxy borders and add a clean bottom divider */
+        th, td {
+          border: none !important;
+          border-bottom: 1px solid rgba(128, 128, 128, 0.2) !important;
+        }
+        /* Remove the divider from the very last row */
+        tr:last-child td {
+          border-bottom: none !important;
+        }
+        /* Style our hidden anchor tags */
+        a[href="#Missed"] { 
+          color: #ef5350 !important; 
+          font-weight: 600 !important; 
+          text-decoration: none !important; 
+          pointer-events: none !important;
+          cursor: default !important;
+        }
+        a[href="#Incoming"] { 
+          color: #66bb6a !important; 
+          font-weight: 600 !important; 
+          text-decoration: none !important; 
+          pointer-events: none !important;
+          cursor: default !important;
+        }
+        a[href="#Outgoing"] { 
+          color: #42a5f5 !important; 
+          font-weight: 600 !important; 
+          text-decoration: none !important; 
+          pointer-events: none !important;
+          cursor: default !important;
+        }
+        a[href="#number"] { 
+          color: #cccccc !important; 
+          text-decoration: none !important; 
+          pointer-events: none !important;
+          cursor: default !important;
+        }
+grid_options:
+  columns: 12
+  rows: auto
+```
 
-**Confirmed working end-to-end against the live site** (login, call-log
-fetch, parsing, and the `sensor.ooma_call_feed` update via the Supervisor
-API all succeeded on a real run). Two things worth knowing about how it got
-there:
 
-- **Why bundling FlareSolverr was abandoned:** an earlier version of this
-  add-on tried bundling FlareSolverr in the same container. Chromium
-  repeatedly failed to start (`session not created: cannot connect to
-  chrome... chrome not reachable`), even after fixing an initial
-  root-vs-non-root permission issue. Research turned up a real,
-  currently-unresolved upstream issue on another community Home Assistant
-  add-on hitting this exact same error with no confirmed fix (abandoned,
-  not resolved) -- so this add-on depends on a separately-run FlareSolverr
-  instance instead (see "Prerequisites" above), which is also what actually
-  ended up working.
-- **The first `sessions.destroy` call on a fresh FlareSolverr instance
-  returns a 500** ("The session doesn't exist") -- expected and harmless,
-  logged and ignored rather than treated as fatal, matching the original
-  Node-RED flow's behavior of never checking that step's result at all.
-
-**A known future risk, not a current problem:** community sources report
+## Notes
+- **A known future risk, not a current problem:** Community sources report
 FlareSolverr is losing effectiveness against Cloudflare's newer Turnstile/
 Managed Challenges as Cloudflare's detection evolves. It works against Ooma
 today (this add-on is a direct port of a flow that's currently working), but
@@ -128,9 +166,6 @@ failing to get past the login page, that's the most likely reason --
 alternatives like [Byparr](https://github.com/ThePhaseless/Byparr) exist,
 but migrating to one is a real, separate effort, not something built in here
 preemptively.
-
-## Notes
-
 - This app is not affiliated with Ooma, Cloudflare, or the FlareSolverr project.
 - Only tested against a single Ooma account, with a single FlareSolverr
   instance running elsewhere on the network -- confirmed working end-to-end.
