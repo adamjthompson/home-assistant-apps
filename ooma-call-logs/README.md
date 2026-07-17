@@ -1,52 +1,24 @@
 # Ooma Call Logs — Home Assistant App
 
-Logs into your Ooma account, reads your recent call log, and updates a
-Home Assistant sensor directly -- no separate Node-RED flow, no
-hand-written MQTT template sensor. Ported from a working Node-RED flow; see
-"How it works" below for what changed and why.
+Logs into your Ooma account, reads your recent call log, and updates a Home Assistant sensor directly.
 
 ## How it works
 
-Ooma's customer portal (`my.ooma.com`) sits behind Cloudflare, so a plain
-HTTP client (or even a plain headless browser) gets blocked before ever
-reaching the login page. This add-on talks to
-[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) -- a proxy that
-drives a specially-patched Chromium to solve Cloudflare's challenge -- to
-get past that, the same way the original Node-RED flow did.
+Ooma's customer portal (`my.ooma.com`) sits behind Cloudflare, so a plain HTTP client (or even a plain headless browser) gets blocked before ever reaching the login page. This add-on talks to[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) (a proxy that drives a specially-patched Chromium to solve Cloudflare's challenge) to get past that.
 
-**This add-on does not bundle or run FlareSolverr itself -- you point it at
-an existing FlareSolverr instance you already run** (`flaresolverr_url`).
+**This add-on does not bundle or run FlareSolverr itself. You point it at an existing FlareSolverr instance you already run** (`flaresolverr_url`).
 
 Only the *first* step (fetching the login page) goes through FlareSolverr:
 
-1. FlareSolverr fetches `https://my.ooma.com/login` and returns the page's
-   HTML plus the Cloudflare-clearance cookies it picked up along the way.
-2. The CSRF token is extracted from that HTML, and a plain (non-FlareSolverr)
-   HTTP POST submits the login form directly, reusing those cookies --
-   Cloudflare's clearance is tied to the cookies/session, not to every
-   individual request needing to go through a real browser again.
-3. Login success is confirmed by finding Ooma's own `_myooma2_session`
-   cookie in the login response.
-4. The call-logs page is fetched directly (same cookies), and its HTML
-   table is parsed with the same regex-based approach the original flow
-   used (matching on cell markup like `icon-down`/`icon-up` classes for
-   call type, not just visible text).
-5. The parsed call list is written directly to a `sensor.ooma_call_feed`
-   entity via Home Assistant's own REST API (`homeassistant_api: true`) --
-   no MQTT broker required.
-
-The sensor's shape deliberately matches the user's original MQTT-triggered
-template sensor exactly (`state` = last-updated timestamp, `attributes.calls`
-/`count`/`status`) and reuses the same entity ID, so an existing dashboard
-card built against that sensor keeps working with zero changes.
+1. FlareSolverr fetches `https://my.ooma.com/login` and returns the page's HTML plus the Cloudflare-clearance cookies it picked up along the way.
+2. The CSRF token is extracted from that HTML, and a plain (non-FlareSolverr) HTTP POST submits the login form directly, reusing those cookies. Cloudflare's clearance is tied to the cookies/session, not to every individual request needing to go through a real browser again.
+3. Login success is confirmed by finding Ooma's own `_myooma2_session` cookie in the login response.
+4. The call-logs page is fetched directly (same cookies), and its HTML table is parsed with the same regex-based approach the original flow used (matching on cell markup like `icon-down`/`icon-up` classes for call type, not just visible text).
+5. The parsed call list is written directly to a `sensor.ooma_call_feed` entity via Home Assistant's own REST API (`homeassistant_api: true`).
 
 ## Prerequisites
 
-**You need a FlareSolverr instance already running somewhere reachable from
-Home Assistant** -- this add-on is just a client, not a FlareSolverr
-install. If you don't already have one, options include a standalone
-`docker run flaresolverr/flaresolverr` on any machine on your network, or a
-community Home Assistant add-on that bundles it.
+**You need a FlareSolverr instance already running somewhere reachable from Home Assistant** If you don't already have one, options include a standalone `docker run flaresolverr/flaresolverr` on any machine on your network, or a community Home Assistant add-on that bundles it.
 
 ## Installation
 
@@ -55,9 +27,7 @@ community Home Assistant add-on that bundles it.
 3. Add this repository URL
 4. Find **Ooma Call Logs** and click **Install**
 
-This app requests `homeassistant_api: true`, which lets Supervisor hand it a
-scoped token to call Home Assistant's own API -- no manual long-lived access
-token or MQTT broker needed.
+This app requests `homeassistant_api: true`, which lets Supervisor hand it a scoped token to call Home Assistant's own API.
 
 ## Configuration
 
@@ -68,27 +38,20 @@ flaresolverr_url: "http://192.168.1.30:8191"
 run_interval_minutes: 15
 ```
 
-- `flaresolverr_url` is the base URL of your existing FlareSolverr instance
-  (no trailing path needed -- `/v1` is appended automatically).
-- `run_interval_minutes` defaults to match the original flow's 15-minute
-  cadence, but each run destroys and recreates a FlareSolverr session --
-  meaning a full patched-Chromium instance spins up every run on *your*
-  FlareSolverr host. That's a real, ongoing CPU/RAM cost (roughly
-  300-500MB+ per session), worth tuning down if 15 minutes turns out to be
-  too frequent for that host's hardware.
+- `flaresolverr_url` is the base URL of your existing FlareSolverr instance (no trailing path needed -- `/v1` is appended automatically).
+- `run_interval_minutes` defaults to a 15-minute cadence, but each run destroys and recreates a FlareSolverr session, meaning a full patched-Chromium instance spins up every run on *your* FlareSolverr host. That's a real, ongoing CPU/RAM cost (roughly 300-500MB+ per session), worth tuning down if 15 minutes turns out to be too frequent for that host's hardware.
 
 ## Home Assistant sensor
 
 Each run updates `sensor.ooma_call_feed` directly:
 
-- `state`: a "last updated" timestamp (the real data lives in attributes,
-  matching the original template sensor's convention)
+- `state`: a "last updated" timestamp (the real data lives in attributes)
 - `attributes.calls`: list of `{type, number, name, date, duration}`
 - `attributes.count`: number of calls found
 - `attributes.status`: `"success"` / `"empty_table"` / `"error"`
 
 ## Dashboard display
-To display the call logs on your dashboard, one solution is to use a markdown card. *Note: Requires that `card_mod` is installed also.*
+To display the call logs on your dashboard, one solution is to use the following markdown card. *Note: Requires that `card_mod` is installed also.*
 
 ```yaml
 type: markdown
@@ -155,17 +118,7 @@ grid_options:
   rows: auto
 ```
 
-
 ## Notes
-- **A known future risk, not a current problem:** Community sources report
-FlareSolverr is losing effectiveness against Cloudflare's newer Turnstile/
-Managed Challenges as Cloudflare's detection evolves. It works against Ooma
-today (this add-on is a direct port of a flow that's currently working), but
-if Ooma's Cloudflare protection changes in the future and this add-on starts
-failing to get past the login page, that's the most likely reason --
-alternatives like [Byparr](https://github.com/ThePhaseless/Byparr) exist,
-but migrating to one is a real, separate effort, not something built in here
-preemptively.
+- **A known future risk, not a current problem:** Community sources report FlareSolverr is losing effectiveness against Cloudflare's newer Turnstile/Managed Challenges as Cloudflare's detection evolves. It works against Ooma today (this add-on is a direct port of a flow that's currently working), but if Ooma's Cloudflare protection changes in the future and this add-on starts failing to get past the login page, that's the most likely reason. Alternatives like [Byparr](https://github.com/ThePhaseless/Byparr) exist, but migrating to one is a real, separate effort, not something built in here preemptively.
 - This app is not affiliated with Ooma, Cloudflare, or the FlareSolverr project.
-- Only tested against a single Ooma account, with a single FlareSolverr
-  instance running elsewhere on the network -- confirmed working end-to-end.
+- This has only been tested against a single Ooma account, with a single FlareSolverr instance running elsewhere on the network.
