@@ -13,9 +13,10 @@ Custom Home Assistant repository for my custom apps.
 
 | App | Description |
 |--------|-------------|
-| [Litter Robot Proxy](litter-robot-proxy/) | Local MQTT proxy for Litter Robot 3 Connect devices |
 | [AES Ohio Energy Usage](ohio-aes/) | Logs into AES Ohio and publishes publishes daily usage to Home Assistant's long-term statistics |
 | [CenterPoint Energy Gas Usage](centerpoint-gas/) | Logs into  CenterPoint Energy and publishes each meter-read cycle's usage to Home Assistant's long-term statistics |
+| [Litter Robot Proxy](litter-robot-proxy/) | Local MQTT proxy for Litter Robot 3 Connect devices |
+| [Ooma Call Logs](ooma-call-logs/) | Logs into Ooma web site and grabs call logs |
 
 ## Requirements
 
