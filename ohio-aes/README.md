@@ -26,12 +26,8 @@ the usage page, it uses the built-in **Download my data** export (the same
 interval usage as CSV, and sums it into hourly totals.
 
 Those hourly totals are imported into Home Assistant via the recorder's
-`recorder/import_statistics` WebSocket command as an external statistic
-(`ohio_aes:hourly_usage`) -- not published as a plain MQTT sensor. This
-matters: a regular sensor state is always timestamped at the moment it's
-received, not by any date/time embedded in its payload, so a value that's
-lagging a day or two behind (AES's data isn't finalized instantly) would show
-up on a chart dated "now" instead of when it actually happened. Statistics
+`recorder/import_statistics` WebSocket command as an external statistic.
+(`ohio_aes:hourly_usage`) -- Statistics
 import lets each hour's usage carry its own real timestamp, so history and
 the Energy Dashboard are dated correctly no matter how far behind AES's data
 finalization runs.
@@ -44,7 +40,7 @@ finalization runs.
 4. Find **AES Ohio Energy Usage** and click **Install**
 
 This app requests `homeassistant_api: true`, which lets Supervisor hand it a
-scoped token to call Home Assistant's own API -- there's nothing to set up
+scoped token to call Home Assistant's own API. There's nothing to set up
 for this yourself; no manual long-lived access token needed.
 
 ## Configuration
@@ -71,19 +67,10 @@ Each run imports hourly kWh totals into the external statistic
    **AES Ohio Hourly Usage** (`ohio_aes:hourly_usage`)
 
 You can also inspect it directly under **Developer Tools → Statistics**.
-There's no separate daily statistic -- Home Assistant aggregates the hourly
-data into daily/monthly views on its own -- and no raw 15-minute-resolution
+There's no separate daily statistic. Home Assistant aggregates the hourly
+data into daily/monthly views on its own. There is no raw 15-minute-resolution
 data either, since HA's statistics tables are hourly-resolution regardless
 of import mechanism.
-
-**Increasing `days_back` does not backfill the older history it newly
-exposes.** The Energy Dashboard needs each hour's cumulative running total,
-not just that hour's usage, and there's no reliable prior baseline to build
-that total on for hours older than what's already been imported -- doing so
-would corrupt every already-imported hour after them. The app detects this
-and skips those older hours (logging a warning), rather than risk corrupting
-existing history. Re-running with `days_back` back at its old value, or
-smaller, is always safe.
 
 AES's export also reliably pads a several-hour mid-day window every day with
 a literal `0.00` kWh reading instead of a real value (for this account,
@@ -94,9 +81,9 @@ real readings on both sides, are estimated instead: a straight-line ramp
 between the average of the last 3 real readings before the gap and the
 average of the first 3 real readings after it, rather than importing a false
 zero-usage dip. Averaging a few readings on each side (rather than just the
-one immediately adjacent to the gap) keeps a single noisy interval -- e.g.
-an AC compressor cycling on right as reporting resumes -- from skewing the
-whole ramp. This is an estimate, not a measurement -- there's no way to flag
+one immediately adjacent to the gap) keeps a single noisy interval, e.g.
+an AC compressor cycling on right as reporting resumes, from skewing the
+whole ramp. This is an estimate, not a measurement. There's no way to flag
 it as such once imported, so every fill is logged (at warning level) with
 the before/after values it ramped
 between. Gaps longer than 6 hours are left alone rather than estimated,
@@ -107,25 +94,9 @@ Behind the scenes, the app keeps a small ledger at
 `/share/ohio_aes_state.json` tracking the cumulative running total the
 Energy Dashboard needs (statistics `sum` values must always increase, so HA
 can compute period consumption as the delta between them). Re-running the
-app, including re-sending the overlapping `days_back` window, is always safe
--- HA overwrites existing hours rather than double-counting them, and a
+app, including re-sending the overlapping `days_back` window, is always safe. HA overwrites existing hours rather than double-counting them, and a
 revised hour's cumulative total correctly carries forward through every later
 hour in that run's batch.
-
-## First-run debugging
-
-The login form fields are confirmed against the live site, but the
-"Your Energy Use" navigation link and the "Download my data" modal
-(date fields, CSV selection, Export button) were mapped from screenshots,
-not live selector inspection — they're the most likely spot to need a
-small tweak. If a run fails, check the app's log for where it failed and
-adjust the corresponding `page.locator`/`page.get_by_...` selector in
-`ohio-aes.py`.
-
-If only the statistics-import step fails (the log will say so, but the run
-overall won't be marked failed), that's most often a temporary HA API/token
-issue -- it retries automatically next `run_interval_hours` cycle and
-self-corrects thanks to the overlap window above.
 
 ## Notes
 

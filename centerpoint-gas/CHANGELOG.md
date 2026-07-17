@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- **Breaking change:** switched the imported unit from kWh to CCF (`THERM_TO_CCF = 1.037`, from https://www.paenergyratings.com/resources/natural-gas-units), since CCF is the unit a CenterPoint gas bill actually shows. Unlike the exact therm-to-kWh conversion this replaces, therm-to-CCF is **not exact** -- 1.037 is a commonly-cited industry-average heating value, not this account's real per-cycle conversion factor (which CenterPoint's billing-history table never exposes), so expect the resulting CCF figures to be off by roughly 1-2% from the true metered volume. Flagged clearly in the statistic's own display name ("CenterPoint Gas Usage (CCF, estimated)") as a persistent reminder, not just in these docs. Uses a **new** statistic_id (`centerpoint_gas:cycle_usage_ccf`) rather than changing the unit on the existing `centerpoint_gas:cycle_usage` -- that one already has real kWh history imported, and changing its unit in place risked HA either rejecting the change or silently mixing kWh and CCF values under one ID (CCF values are ~29x smaller than the equivalent kWh, which would look badly wrong on a chart). **Migration:** remove the old kWh source from the Energy Dashboard and add the new CCF one in its place.
+
+## 0.2.1
+
+- `gmail_address`/`gmail_app_password` are now optional (schema `str?`/`password?`) rather than presented as required -- 2FA has never actually triggered in any real run so far, so requiring everyone to hand over Gmail mailbox access for a dormant fallback wasn't justified. If 2FA is ever challenged with these left blank, the run now fails with a clear, actionable log message instead of attempting an IMAP login with empty credentials.
+- Replaced the generic, guessed `SUBJECT "verification"` IMAP search with the real confirmed sender and subject, from an actual captured 2FA email: sent by `msonlineservicesteam@microsoftonline.com` (Microsoft's own Azure B2C verification-email service), subject "CenterPoint Energy account email verification code". Verified the quoted-printable HTML body decodes and the 6-digit code extracts correctly against the real email's exact structure. The verification-code entry page/field itself is still unconfirmed, since that requires an actual 2FA challenge to observe.
+
 ## 0.2.0
 
 - **First fully working end-to-end run against the live site**, confirmed by the user: login, both usage-history navigation clicks, table scrape, and statistics import all succeeded.

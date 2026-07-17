@@ -6,11 +6,11 @@ configuration:
     name: CenterPoint Password
     description: "Your CenterPoint Energy account login password."
   gmail_address:
-    name: Gmail Address
-    description: "The Gmail address that receives CenterPoint's 2FA verification-code emails."
+    name: Gmail Address (optional)
+    description: "Optional. The Gmail address that receives CenterPoint's 2FA verification-code emails, only used if CenterPoint ever actually challenges a login with 2FA (hasn't happened in testing so far -- the add-on works fine without this set). Leave blank unless you want automatic 2FA recovery; if 2FA is challenged with this unset, the run fails with a clear error instead of crashing."
   gmail_app_password:
-    name: Gmail App Password
-    description: "A Gmail app password (not your regular Google password) used to read the 2FA code via IMAP when CenterPoint challenges a login. Requires 2-Step Verification enabled on the Google account to generate one. Note: this grants read access to the entire mailbox, not just CenterPoint's emails -- a dedicated Gmail account used only for utility 2FA mail is a stronger isolation option if you'd prefer not to grant access to your everyday inbox."
+    name: Gmail App Password (optional)
+    description: "Optional, only needed alongside gmail_address. A Gmail app password (not your regular Google password) used to read the 2FA code via IMAP when CenterPoint challenges a login. Requires 2-Step Verification enabled on the Google account to generate one. Note: this grants read access to the entire mailbox, not just CenterPoint's emails -- a dedicated Gmail account used only for utility 2FA mail is a stronger isolation option if you'd prefer not to grant access to your everyday inbox."
   cycles_back:
     name: Billing Cycles Back
     description: "How many recent meter-read cycles to import each run. The billing-history table shows at most 24, so anything higher just imports everything available."

@@ -1,6 +1,6 @@
 name: "CenterPoint Energy Gas Usage"
 description: "Logs into CenterPoint Energy, reads your natural gas billing-history table, and imports it into Home Assistant's long-term statistics for the Energy Dashboard."
-version: "0.2.0"
+version: "0.3.0"
 slug: "centerpoint_gas"
 init: false
 arch:
@@ -19,8 +19,8 @@ options:
 schema:
   centerpoint_username: str
   centerpoint_password: password
-  gmail_address: str
-  gmail_app_password: password
+  gmail_address: "str?"
+  gmail_app_password: "password?"
   cycles_back: int(1,24)
   run_interval_hours: int(1,168)
 logger: true

@@ -11,15 +11,22 @@ Unlike this repo's ohio-aes add-on, CenterPoint's billing-history table
 already reports both the period usage (Therms) and the absolute cumulative
 meter reading for each row, so there's no local ledger or cumulative-sum
 reconstruction needed here -- each row is a fully self-contained statistic
-entry. Therms are converted to kWh (THERM_TO_KWH below) since HA's Energy
-Dashboard gas-source unit picker doesn't accept therms directly.
+entry. Therms are converted to CCF (THERM_TO_CCF below) since HA's Energy
+Dashboard gas-source unit picker doesn't accept therms directly. Unlike the
+therm-to-kWh conversion this replaced, this one is NOT exact -- see
+THERM_TO_CCF's comment.
 
 Login and table-scrape selectors were confirmed against the real login page
 markup (CenterPoint uses Azure AD B2C's default self-asserted sign-in
 template -- #signInName/#password/#rememberMe/#next are the platform's own
 field IDs, not guesses) and the real billing-history table sample provided
-during development. The 2FA-challenge step (which page/field it uses) is
-still unconfirmed since it only appears after a real login.
+during development. The 2FA email itself (sender, subject, code format) is
+also confirmed against a real captured message -- it's Microsoft's own
+Azure B2C verification-email service, not a centerpointenergy.com address.
+Still unconfirmed: the actual verification-code *entry page/field*
+(`input[name="verificationCode"]`), since 2FA has never actually been
+challenged in a real login yet -- only the retrieval side has real data to
+go on.
 """
 
 import asyncio
@@ -44,8 +51,11 @@ log = logging.getLogger("centerpoint_gas")
 
 CENTERPOINT_USERNAME = os.environ["CENTERPOINT_USERNAME"]
 CENTERPOINT_PASSWORD = os.environ["CENTERPOINT_PASSWORD"]
-GMAIL_ADDRESS = os.environ["GMAIL_ADDRESS"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+# Optional -- only ever needed if CenterPoint actually challenges a login
+# with 2FA, which hasn't happened in any real run yet (repeated logins have
+# all skipped it, cause unconfirmed). Not required for the add-on to work.
+GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 CYCLES_BACK = int(os.environ.get("CYCLES_BACK", 3))
 
 CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "/usr/bin/chromium-browser")
@@ -115,16 +125,31 @@ SUPERVISOR_TOKEN = os.environ.get("SUPERVISOR_TOKEN")
 SUPERVISOR_API_BASE = "http://supervisor/core/api"
 SUPERVISOR_WS_URL = "ws://supervisor/core/websocket"
 
-STATISTIC_ID = "centerpoint_gas:cycle_usage"
+# New statistic_id (not the original `centerpoint_gas:cycle_usage`) --
+# that one already has real kWh history imported. Changing its unit under
+# the same ID risks HA either rejecting the metadata change or silently
+# mixing kWh and CCF values together (CCF values are ~29x smaller than the
+# equivalent kWh, which would look badly wrong on a chart). Migrating means
+# removing the old kWh source from the Energy Dashboard and adding this one.
+STATISTIC_ID = "centerpoint_gas:cycle_usage_ccf"
 
 # HA's Energy Dashboard gas-source unit picker accepts volume units
 # (CCF/ft³/L/MCF/m³) and energy units (cal/Gcal/GJ/GWh/J/kcal/kJ/kWh/Mcal/MJ/
 # mWh/MWh/TWh/Wh) -- confirmed directly against a real HA instance -- but NOT
-# therms. Therms are already an energy value (that's why utilities bill gas
-# in therms rather than raw volume -- it accounts for the actual heating
-# value of the gas delivered), so this is a fixed, exact linear conversion
-# rather than something recoverable as a volume unit.
-THERM_TO_KWH = 29.3001111
+# therms directly.
+#
+# IMPORTANT: unlike the exact therm<->kWh conversion this replaced (a fixed
+# physical definition, no ambiguity), therm<->CCF depends on the actual
+# heating value (BTU/cubic-foot) of the specific gas delivered, which varies
+# by region/season/supplier -- CenterPoint's own billing-history table never
+# exposes the exact factor it used for a given cycle, only Therms and the
+# cumulative Meter Reading (already in therm-equivalent units). 1.037 is a
+# commonly-cited industry-average heating value (source:
+# https://www.paenergyratings.com/resources/natural-gas-units), not this
+# account's actual real factor for any given cycle -- expect the resulting
+# CCF figures to be off by roughly 1-2% from what CenterPoint's own systems
+# would show as the true metered volume.
+THERM_TO_CCF = 1.037
 
 
 # ─── Gmail 2FA code retrieval ──────────────────────────────────────────────────
@@ -135,10 +160,15 @@ THERM_TO_KWH = 29.3001111
 # password -- note this grants read access to the whole mailbox, not just
 # CenterPoint's emails, since an app password can't be scoped narrower.
 #
-# TODO: the sender/subject search terms and the code-format regex below are
-# unconfirmed placeholders -- update once a real 2FA email sample is
-# available.
+# Sender/subject/code-format confirmed against a real captured 2FA email:
+# it's sent by Microsoft's own Azure B2C "IdentityExperienceFramework"
+# verification-email service on CenterPoint's behalf (not from any
+# centerpointenergy.com address, matching CenterPoint's B2C-based login),
+# single-part text/html, quoted-printable encoded, body reading "Your code
+# is: <6 digits>".
 
+_2FA_SENDER = "msonlineservicesteam@microsoftonline.com"
+_2FA_SUBJECT = "verification code"
 _CODE_RE = re.compile(r"\b(\d{6})\b")
 
 
@@ -160,9 +190,9 @@ def _search_gmail_for_code(after_time):
         imap.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         imap.select("INBOX", readonly=True)
         since_str = after_time.strftime("%d-%b-%Y")
-        # TODO: narrow this once the real sender address is known, e.g.
-        # imap.search(None, 'FROM', '"noreply@centerpointenergy.com"')
-        status, data = imap.search(None, f'(SINCE "{since_str}" SUBJECT "verification")')
+        status, data = imap.search(
+            None, f'(SINCE "{since_str}" FROM "{_2FA_SENDER}" SUBJECT "{_2FA_SUBJECT}")'
+        )
         if status != "OK" or not data or not data[0]:
             return None
         message_ids = data[0].split()
@@ -183,6 +213,14 @@ def _search_gmail_for_code(after_time):
 
 
 async def fetch_2fa_code(after_time, timeout_seconds=60, poll_interval=5):
+    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+        raise RuntimeError(
+            "CenterPoint is asking for a 2FA code, but gmail_address/"
+            "gmail_app_password aren't configured -- set both in this "
+            "add-on's config to enable automatic code retrieval, or log "
+            "into CenterPoint manually once from the same network to "
+            "refresh the remembered-device session."
+        )
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout_seconds
     while loop.time() < deadline:
@@ -396,29 +434,30 @@ def compute_statistics_entries(billing_rows, tz):
 
     for i, row in enumerate(ordered):
         cur_date = row["date"]
-        cur_sum_kwh = round(row["meter_reading"] * THERM_TO_KWH, 3)
+        cur_sum_ccf = round(row["meter_reading"] * THERM_TO_CCF, 3)
 
         if i == 0:
             start = datetime.combine(cur_date, datetime.min.time()).replace(tzinfo=tz)
             entries.append({
                 "start": start.isoformat(),
-                "state": round(row["therms"] * THERM_TO_KWH, 3),
-                "sum": cur_sum_kwh,
+                "state": round(row["therms"] * THERM_TO_CCF, 3),
+                "sum": cur_sum_ccf,
             })
             continue
 
         prev_date = ordered[i - 1]["date"]
-        prev_sum_kwh = round(ordered[i - 1]["meter_reading"] * THERM_TO_KWH, 3)
+        prev_sum_ccf = round(ordered[i - 1]["meter_reading"] * THERM_TO_CCF, 3)
         cycle_days = (cur_date - prev_date).days
         if cycle_days <= 0:
             log.warning("Skipping row with non-increasing reading date: %s", cur_date)
             continue
 
-        daily_kwh = round((cur_sum_kwh - prev_sum_kwh) / cycle_days, 3)
+        daily_ccf = round((cur_sum_ccf - prev_sum_ccf) / cycle_days, 3)
         log.info(
-            "Spreading %.3f kWh evenly across %d day(s) between %s and %s "
-            "(%.3f kWh/day -- an averaged estimate, not measured daily usage)",
-            cur_sum_kwh - prev_sum_kwh, cycle_days, prev_date, cur_date, daily_kwh,
+            "Spreading %.3f CCF (estimated, see THERM_TO_CCF) evenly across "
+            "%d day(s) between %s and %s (%.3f CCF/day -- an averaged "
+            "estimate, not measured daily usage)",
+            cur_sum_ccf - prev_sum_ccf, cycle_days, prev_date, cur_date, daily_ccf,
         )
 
         for day_offset in range(1, cycle_days + 1):
@@ -427,14 +466,14 @@ def compute_statistics_entries(billing_rows, tz):
             # Land exactly on the real cumulative reading on the actual
             # meter-read date, rather than compounding rounding error
             # across the cycle.
-            day_sum_kwh = (
-                cur_sum_kwh if day_offset == cycle_days
-                else round(prev_sum_kwh + daily_kwh * day_offset, 3)
+            day_sum_ccf = (
+                cur_sum_ccf if day_offset == cycle_days
+                else round(prev_sum_ccf + daily_ccf * day_offset, 3)
             )
             entries.append({
                 "start": start.isoformat(),
-                "state": daily_kwh,
-                "sum": day_sum_kwh,
+                "state": daily_ccf,
+                "sum": day_sum_ccf,
             })
 
     return entries
@@ -458,12 +497,12 @@ async def import_cycle_statistics(entries):
         "type": "recorder/import_statistics",
         "metadata": {
             "has_sum": True,
-            "name": "CenterPoint Gas Usage",
+            "name": "CenterPoint Gas Usage (CCF, estimated)",
             "source": "centerpoint_gas",
             "statistic_id": STATISTIC_ID,
-            "unit_of_measurement": "kWh",
+            "unit_of_measurement": "CCF",
             "mean_type": 0,
-            "unit_class": "energy",
+            "unit_class": "volume",
         },
         "stats": entries,
     }
