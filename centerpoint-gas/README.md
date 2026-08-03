@@ -124,6 +124,39 @@ run_interval_hours: 24
   a new row only ever appears once per meter-read cycle (roughly every
   28-33 days), so frequent runs just risk unnecessary logins for no new data.
 
+## Standalone Home Assistant Core usage (no Supervisor)
+
+If you run Home Assistant Core directly (no Supervisor/HAOS -- e.g. a venv
+or a plain Docker container without the add-on framework), `core.py` lets
+you run this same collector against your Core instance's regular API
+instead of installing it as a Supervisor add-on.
+
+```bash
+export CENTERPOINT_USERNAME="your-centerpoint-username"
+export CENTERPOINT_PASSWORD="your-centerpoint-password"
+export HA_URL="http://homeassistant.local:8123"
+export HA_TOKEN="your-long-lived-access-token"
+python3 centerpoint-gas/core.py
+```
+
+- `HA_URL` is your Home Assistant Core instance's base URL.
+- `HA_TOKEN` is a long-lived access token (**Profile → Security →
+  Long-Lived Access Tokens** in Home Assistant), since there's no Supervisor
+  to inject one automatically.
+- Every other config option (`gmail_address`, `gmail_app_password`,
+  `cycles_back`) is set the same way as the Supervisor add-on -- as an
+  environment variable, using the same names.
+- Run it on a schedule yourself (cron, systemd timer, etc.) -- there's no
+  built-in loop here the way the Supervisor add-on's `run.sh` provides one,
+  so `run_interval_hours` doesn't apply to this path.
+
+`core.py` works by pointing the same collector at your Core instance's
+`/api` and `/api/websocket` endpoints instead of the Supervisor-proxied
+ones. It relies on `centerpoint-gas.py` exposing `SUPERVISOR_TOKEN`/
+`SUPERVISOR_API_BASE`/`SUPERVISOR_WS_URL` as simple module-level values --
+if that internal structure changes in a future update, `core.py` may need
+a matching update.
+
 ## Home Assistant statistics
 
 Each run imports gas usage into the external statistic
