@@ -23,10 +23,13 @@ field IDs, not guesses) and the real billing-history table sample provided
 during development. The 2FA email itself (sender, subject, code format) is
 also confirmed against a real captured message -- it's Microsoft's own
 Azure B2C verification-email service, not a centerpointenergy.com address.
+The 2FA flow itself has an MFA method-choice step confirmed via a real
+screenshot of a manual login -- "Phone" is pre-selected by default, so
+Email must be explicitly chosen since only Gmail retrieval is implemented.
 Still unconfirmed: the actual verification-code *entry page/field*
-(`input[name="verificationCode"]`), since 2FA has never actually been
-challenged in a real login yet -- only the retrieval side has real data to
-go on.
+(`input[name="verificationCode"]`) that follows the method choice, since a
+real login has never gotten that far yet -- only the method-choice step has
+real data to go on.
 """
 
 import asyncio
@@ -234,28 +237,29 @@ async def fetch_2fa_code(after_time, timeout_seconds=60, poll_interval=5):
 # ─── Browser automation ───────────────────────────────────────────────────────
 
 async def _goto_checked(page, url, **kwargs):
-    """page.goto() that fails loudly on a non-2xx/3xx response.
+    """page.goto() that logs (but does not fail on) a non-2xx/3xx response.
 
-    Confirmed necessary after a live run where CenterPoint's account-home
-    URL returned a plain HTTP 404 -- _needs_login only distinguishes "login
-    page" from "not login page", so a 404 (or any other error page) sailed
-    through as if it were a successful, authenticated page, and the real
-    failure only surfaced two steps later as a confusing "couldn't find the
-    View Usage link". This catches that class of failure immediately, with
-    the actual status code and page text logged right at the point it
-    happened.
+    Originally raised unconditionally on a bad status, added after a live
+    run where CenterPoint's account-home URL returned a plain HTTP 404 with
+    a genuinely broken/empty page. But a *second* live run showed this
+    site's B2C login redirect can report HTTP 404 on a completely normal,
+    fully-working sign-in page too (very likely a client-side-routed SPA
+    quirk, where the server 404s the literal path while the SPA's own JS
+    still renders the correct page) -- so the raw status code alone isn't a
+    reliable signal on this site and raising on it produces false
+    positives. Downstream content-based checks (_needs_login,
+    _navigate_to_billing_history's own diagnostics) are the real source of
+    truth for whether something is actually broken; this only logs the
+    status code as a diagnostic breadcrumb.
     """
     response = await page.goto(url, **kwargs)
     if response is not None and response.status >= 400:
-        body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 500)")
-        log.error(
-            "Navigating to %s returned HTTP %d. Page text: %r",
-            url, response.status, body_snippet,
-        )
-        raise RuntimeError(
-            f"Navigating to {url} returned HTTP {response.status} -- "
-            f"either CenterPoint's site changed or this was a transient "
-            f"error, see logged page text above"
+        log.warning(
+            "Navigating to %s returned HTTP %d -- continuing, since this "
+            "site is known to report misleading status codes on otherwise "
+            "working pages; downstream checks will catch it if this page "
+            "is genuinely broken.",
+            url, response.status,
         )
     return response
 
@@ -288,9 +292,19 @@ async def _login_with_2fa(page):
     # that the attempt actually completed -- confirmed necessary after a real
     # run where "networkidle" resolved while still sitting on the unsubmitted
     # sign-in page, and the code below wrongly read that as "no 2FA needed".
+    #
+    # BUT: credentials being accepted can lead to two different outcomes,
+    # both still served from login.centerpointenergy.com -- a direct
+    # redirect away (no MFA), or an MFA method-choice page ("Multi-factor
+    # Authentication", confirmed via a real screenshot of a manual login).
+    # Waiting only for "left the login domain" would misdiagnose a real MFA
+    # challenge as a failed/stuck login, since the method-choice page (and
+    # whatever code-entry page follows it) never leaves that domain until
+    # after MFA actually completes.
     try:
         await page.wait_for_function(
-            "() => !location.host.includes('login.centerpointenergy.com')",
+            "() => !location.host.includes('login.centerpointenergy.com') || "
+            "document.body.innerText.includes('Multi-factor Authentication')",
             timeout=30_000,
         )
     except Exception:
@@ -309,16 +323,42 @@ async def _login_with_2fa(page):
     # much more robust signal that the page itself is actually usable.
     await page.wait_for_load_state("load")
 
-    # TODO: unconfirmed -- this step only appears after a real login, which
-    # hasn't happened yet. Update the selector/detection once seen for real.
+    if "login.centerpointenergy.com" not in page.url:
+        log.info("No 2FA challenge -- device appears to be remembered")
+        return
+
+    # MFA method-choice page confirmed via a real screenshot: "Phone" is
+    # pre-selected by default, but we can only retrieve a code via Gmail
+    # IMAP, not SMS/phone, so Email must be explicitly selected.
+    log.info("MFA method-choice page detected, selecting Email")
+    email_option = page.get_by_label("Email")
+    if await email_option.count() == 0:
+        email_option = page.get_by_text("Email", exact=True)
+    await email_option.first.click()
+    await page.get_by_role("button", name="Continue").click()
+    await page.wait_for_load_state("load")
+
+    # TODO: unconfirmed -- the actual code-entry page has never been seen,
+    # only the preceding method-choice step has. Update the selector once
+    # seen for real; the diagnostic dump below should give what's needed.
     if await page.locator('input[name="verificationCode"]').count() > 0:
         log.info("2FA challenge detected, fetching code from Gmail")
         code = await fetch_2fa_code(after_time=login_start_time)
         await page.fill('input[name="verificationCode"]', code)
         await page.click('button[type="submit"]')
         await page.wait_for_load_state("load")
-    else:
-        log.info("No 2FA challenge -- device appears to be remembered")
+    elif "login.centerpointenergy.com" in page.url:
+        body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 2000)")
+        all_inputs = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('input')).map("
+            "i => ({name: i.name, id: i.id, type: i.type}))"
+        )
+        log.error(
+            "Still on the login domain after the MFA method choice, and no "
+            "known verification-code field found. Page text: %r", body_snippet,
+        )
+        log.error("All input fields found: %r", all_inputs)
+        raise RuntimeError("Could not find the verification-code field -- see debug output above")
 
 
 async def scrape_billing_history(page):

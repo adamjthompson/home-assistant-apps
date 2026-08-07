@@ -60,23 +60,27 @@ its own reading date instead.
 
 ### Login and 2FA
 
-CenterPoint's login can challenge with a verification code emailed to you,
-though not on every login -- the site appears to remember the device for a
-while, and in testing so far it has never actually challenged a login at
-all (possibly IP-based trust, possibly the
-verification feature not being fully rolled out yet). To handle it without
-manual intervention *if* it ever does happen:
+CenterPoint's login can challenge with a verification code, though not on
+every login -- the site appears to remember the device for a while. A real
+manual login confirmed the actual flow has an extra step this add-on didn't
+originally account for: after credentials are accepted, an intermediate
+"Multi-factor Authentication" page asks whether to send the code via
+**Phone** (pre-selected by default) or **Email** -- no code is sent until
+you pick one and continue. To handle it without manual intervention *if* it
+happens:
 
 1. The app persists the browser session (cookies) to
    `/data/centerpoint_state.json` after every successful login. Most runs
    reuse that session and skip login/2FA entirely.
-2. If a fresh login is needed and a 2FA prompt appears, the app reads the
-   verification code directly from a Gmail inbox via IMAP, using an app
-   password -- **but only if `gmail_address`/`gmail_app_password` are
-   configured.** Both are optional; if 2FA is ever challenged with these
-   left blank, the run fails with a clear log message telling you to either
-   configure them or log into CenterPoint manually once to refresh the
-   remembered-device session, rather than crashing confusingly.
+2. If a fresh login is needed and the MFA method-choice page appears, the
+   app explicitly selects **Email** (Phone isn't an option here, since only
+   Gmail-based retrieval is implemented), then reads the verification code
+   directly from a Gmail inbox via IMAP, using an app password -- **but
+   only if `gmail_address`/`gmail_app_password` are configured.** Both are
+   optional; if 2FA is ever challenged with these left blank, the run fails
+   with a clear log message telling you to either configure them or log
+   into CenterPoint manually once to refresh the remembered-device session,
+   rather than crashing confusingly.
 
 **Security note:** the Gmail app password grants IMAP read access to the
 *entire* mailbox, not just CenterPoint's emails -- there's no way to scope an
@@ -187,14 +191,15 @@ subject "CenterPoint Energy account email verification code" and a 6-digit
 code in the body -- `_search_gmail_for_code` matches on the real sender/
 subject now, not a generic guess.
 
-**One thing remains unconfirmed:** the actual verification-code entry
-page/field (`_login_with_2fa`'s check for `input[name="verificationCode"]`),
-since CenterPoint has never actually challenged a real login with 2FA yet
-(possibly IP/network-based trust, or the
-verification feature not being fully enforced yet, per the login page's own
-"we are implementing a standard account verification process" banner text).
-The email-retrieval side is ready to go; only the "fill the code into the
-page" side is still a guess.
+**The MFA method-choice page is confirmed** via a real screenshot of a
+manual login: "Phone" is pre-selected by default, so the app explicitly
+selects "Email" before continuing. **One thing remains unconfirmed:** the
+actual verification-code entry page/field that follows it
+(`_login_with_2fa`'s check for `input[name="verificationCode"]`), since a
+real login has never gotten that far yet. If this guess is wrong, the log
+will show a full diagnostic dump (page text + every input field found) --
+share that and the selector can be corrected. The email-retrieval side
+(sender/subject/code format) is otherwise ready to go.
 
 If a run fails, check the log. Both `_navigate_to_billing_history` and
 `scrape_billing_history` log the actual page text/links on failure (not

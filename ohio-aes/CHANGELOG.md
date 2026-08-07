@@ -2,7 +2,7 @@
 
 ## 0.2.6
 
-- Fixed a real bug in `page.goto(LOGIN_URL, wait_until="networkidle")` which timed out at 30s on the very first navigation, failing the run before login even started. Replaced every `wait_until="networkidle"`/`wait_for_load_state("networkidle")` in the login/navigation flow with `"load"`. `networkidle` can hang indefinitely on real-world sites with persistent background network activity (analytics, heartbeats, etc.), even once the page has genuinely finished loading. `"load"` is a far more reliable completion signal.
+- Fixed `page.goto(LOGIN_URL, wait_until="networkidle")` which timed out at 30s on the very first navigation, failing the run before login even started. Replaced every `wait_until="networkidle"`/`wait_for_load_state("networkidle")` in the login/navigation flow with `"load"`. `networkidle` can hang indefinitely on real-world sites with persistent background network activity (analytics, heartbeats, etc.), even once the page has genuinely finished loading. `"load"` is a far more reliable completion signal.
 
 ## 0.2.5
 
