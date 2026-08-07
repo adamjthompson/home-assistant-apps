@@ -99,11 +99,31 @@ def _build_login_url():
 _USAGE_NAV_STEPS = ["View Usage", "View Historical Energy Usage"]
 
 
+async def _safe_body_text(page, limit=2000):
+    """document.body.innerText for diagnostics, tolerant of the page being
+    mid-navigation.
+
+    Confirmed necessary after a live run: a diagnostic snapshot taken right
+    after a fast redirect (e.g. following the MFA method-choice page) can
+    land in a transient window where <body> doesn't exist yet, or the whole
+    execution context has been torn down -- either way raising a *new*
+    error that masks whatever the original failure actually was. This must
+    never itself crash, since it only exists to help explain a failure.
+    """
+    try:
+        text = await page.evaluate(
+            f"() => document.body ? document.body.innerText.slice(0, {limit}) : null"
+        )
+        return text if text is not None else "(page had no <body> yet -- likely mid-navigation)"
+    except Exception as e:
+        return f"(could not read page text, page was likely mid-navigation: {e})"
+
+
 async def _navigate_to_billing_history(page):
     for step_text in _USAGE_NAV_STEPS:
         locator = page.get_by_text(step_text, exact=False)
         if await locator.count() == 0:
-            body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 2000)")
+            body_snippet = await _safe_body_text(page)
             all_links = await page.evaluate(
                 "() => Array.from(document.querySelectorAll('a')).map(a => a.innerText.trim()).filter(Boolean)"
             )
@@ -304,11 +324,11 @@ async def _login_with_2fa(page):
     try:
         await page.wait_for_function(
             "() => !location.host.includes('login.centerpointenergy.com') || "
-            "document.body.innerText.includes('Multi-factor Authentication')",
+            "(document.body && document.body.innerText.includes('Multi-factor Authentication'))",
             timeout=30_000,
         )
     except Exception:
-        body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 2000)")
+        body_snippet = await _safe_body_text(page)
         log.error(
             "Still on the login page 30s after submitting -- likely bad "
             "credentials or an on-page validation error. Page text: %r",
@@ -348,7 +368,7 @@ async def _login_with_2fa(page):
         await page.click('button[type="submit"]')
         await page.wait_for_load_state("load")
     elif "login.centerpointenergy.com" in page.url:
-        body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 2000)")
+        body_snippet = await _safe_body_text(page)
         all_inputs = await page.evaluate(
             "() => Array.from(document.querySelectorAll('input')).map("
             "i => ({name: i.name, id: i.id, type: i.type}))"
@@ -394,7 +414,7 @@ async def scrape_billing_history(page):
                 rows: null,
                 tableCount: tables.length,
                 tableSnippets: tables.map(t => t.innerText.slice(0, 200)),
-                bodySnippet: document.body.innerText.slice(0, 2000),
+                bodySnippet: document.body ? document.body.innerText.slice(0, 2000) : null,
             };
         }
         """

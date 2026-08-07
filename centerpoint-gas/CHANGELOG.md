@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3
+
+- A diagnostic `page.evaluate("() => document.body.innerText...")` call, meant to log page text after a failure, itself crashed with `Cannot read properties of null (reading 'innerText')`, landing in a transient window (likely right after the MFA method-choice page's redirect) where `document.body` didn't exist yet, or the execution context had already been torn down by a navigation. That crash masked whatever the original failure actually was, since it replaced the real error entirely. Added `_safe_body_text`, a null-safe, exception-tolerant wrapper now used everywhere this add-on takes a diagnostic page-text snapshot. It degrades gracefully (returning a clearly-labeled placeholder string) instead of ever crashing itself, since diagnostic code exists to explain a failure, not cause a new one.
+
 ## 0.3.2
 
 - Softened `_goto_checked` (added in 0.3.1) from a hard failure to a logged warning on a non-2xx/3xx response: a second live run showed CenterPoint's B2C login redirect can report HTTP 404 on a completely normal, fully-working sign-in page (very likely a client-side-routed SPA quirk where the server 404s the literal path while the SPA's JS still renders it correctly) -- so the raw status code alone isn't a reliable signal on this site, and 0.3.1's hard-fail turned that into a false-positive regression. Content-based checks (`_needs_login`, etc.) remain the real source of truth; the status code is now only logged as a diagnostic breadcrumb.
