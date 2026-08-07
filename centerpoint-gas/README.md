@@ -191,15 +191,15 @@ subject "CenterPoint Energy account email verification code" and a 6-digit
 code in the body -- `_search_gmail_for_code` matches on the real sender/
 subject now, not a generic guess.
 
-**The MFA method-choice page is confirmed** via a real screenshot of a
-manual login: "Phone" is pre-selected by default, so the app explicitly
-selects "Email" before continuing. **One thing remains unconfirmed:** the
-actual verification-code entry page/field that follows it
-(`_login_with_2fa`'s check for `input[name="verificationCode"]`), since a
-real login has never gotten that far yet. If this guess is wrong, the log
-will show a full diagnostic dump (page text + every input field found) --
-share that and the selector can be corrected. The email-retrieval side
-(sender/subject/code format) is otherwise ready to go.
+**The MFA method-choice page and the verification-code page are both
+DOM-confirmed** via real captures from live runs, not guesses. On the
+method-choice page, CenterPoint renders the real B2C field
+(`#mfaMethod_email`) hidden (`display: none`) and shows a separate
+custom-styled clickable layer (`#custom_email`) instead -- the app checks
+`#custom_email` first (a normal, real click) and force-checks
+`#mfaMethod_email` as a backup, then submits via the confirmed `#continue`
+button. The code-entry field is `#verificationCode` (its `name` attribute
+is blank, so it must be selected by id).
 
 If a run fails, check the log. Both `_navigate_to_billing_history` and
 `scrape_billing_history` log the actual page text/links on failure (not

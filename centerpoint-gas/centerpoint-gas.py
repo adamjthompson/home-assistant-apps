@@ -350,12 +350,49 @@ async def _login_with_2fa(page):
     # MFA method-choice page confirmed via a real screenshot: "Phone" is
     # pre-selected by default, but we can only retrieve a code via Gmail
     # IMAP, not SMS/phone, so Email must be explicitly selected.
+    #
+    # The real DOM (captured directly from a live run) confirms why the
+    # earlier click-based selection wasn't reliable: this page renders the
+    # actual B2C self-asserted field (name="mfaMethod", ids
+    # #mfaMethod_phone/#mfaMethod_email) inside
+    # `<div id="attributeList" class="attr" style="display: none;">` --
+    # entirely hidden, not the real interactive control. CenterPoint
+    # replaces it visually with a custom-styled, genuinely visible layer
+    # (`.custom-mfa-container`, name="customMfaMethod", ids
+    # #custom_phone/#custom_email) that a real user actually clicks.
+    # Checking #custom_email first (a normal, non-forced check, since it's
+    # genuinely visible) fires whatever real click/change handlers
+    # CenterPoint wired to it -- the same interaction path a human takes.
+    # #mfaMethod_email is then also force-checked as a redundant safety
+    # net, in case the hidden field isn't kept in sync purely by that
+    # handler and the form submission still reads it directly.
     log.info("MFA method-choice page detected, selecting Email")
-    email_option = page.get_by_label("Email")
-    if await email_option.count() == 0:
-        email_option = page.get_by_text("Email", exact=True)
-    await email_option.first.click()
-    await page.get_by_role("button", name="Continue").click()
+    for selector in ("#custom_email", "#mfaMethod_email"):
+        locator = page.locator(selector)
+        if await locator.count() > 0:
+            try:
+                await locator.first.check(force=True)
+            except Exception as e:
+                log.warning("Could not check %s while selecting Email: %s", selector, e)
+        else:
+            log.warning("%s not found on the MFA method-choice page", selector)
+
+    log.info(
+        "Post-selection checked state -- custom_email: %s, mfaMethod_email: %s",
+        await page.locator("#custom_email").is_checked()
+        if await page.locator("#custom_email").count() > 0 else "not found",
+        await page.locator("#mfaMethod_email").is_checked()
+        if await page.locator("#mfaMethod_email").count() > 0 else "not found",
+    )
+
+    # Confirmed via the real DOM: this page's submit button is
+    # `<button id="continue" type="submit" form="attributeVerification">`,
+    # not #next (that id belongs to the earlier sign-in page). Falls back
+    # to text matching only if a future page revision changes the id.
+    continue_button = page.locator("#continue")
+    if await continue_button.count() == 0:
+        continue_button = page.get_by_role("button", name="Continue")
+    await continue_button.first.click()
 
     # Confirmed via a live run: clicking Continue shows a "Please Wait...
     # do not close this window" processing overlay while the code is
