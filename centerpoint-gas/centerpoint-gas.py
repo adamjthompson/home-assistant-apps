@@ -8,28 +8,27 @@ Assistant's long-term statistics as an external statistic, so the Energy
 Dashboard shows a correctly-dated gas consumption source.
 
 Unlike this repo's ohio-aes add-on, CenterPoint's billing-history table
-already reports both the period usage (Therms) and the absolute cumulative
-meter reading for each row, so there's no local ledger or cumulative-sum
+already reports both the period usage and the absolute cumulative meter
+reading for each row, so there's no local ledger or cumulative-sum
 reconstruction needed here -- each row is a fully self-contained statistic
-entry. Therms are converted to CCF (THERM_TO_CCF below) since HA's Energy
-Dashboard gas-source unit picker doesn't accept therms directly. Unlike the
-therm-to-kWh conversion this replaced, this one is NOT exact -- see
-THERM_TO_CCF's comment.
+entry. The usage column is labeled **CCF** directly on the real site (a
+0.3.0-era assumption that it was Therms, needing an estimated conversion,
+was wrong -- confirmed via a live run's own captured table header -- so no
+conversion is applied; the scraped figures are used as-is and are exact,
+not estimated).
 
-Login and table-scrape selectors were confirmed against the real login page
-markup (CenterPoint uses Azure AD B2C's default self-asserted sign-in
-template -- #signInName/#password/#rememberMe/#next are the platform's own
-field IDs, not guesses) and the real billing-history table sample provided
-during development. The 2FA email itself (sender, subject, code format) is
-also confirmed against a real captured message -- it's Microsoft's own
-Azure B2C verification-email service, not a centerpointenergy.com address.
-The 2FA flow itself has an MFA method-choice step confirmed via a real
-screenshot of a manual login -- "Phone" is pre-selected by default, so
-Email must be explicitly chosen since only Gmail retrieval is implemented.
-Still unconfirmed: the actual verification-code *entry page/field*
-(`input[name="verificationCode"]`) that follows the method choice, since a
-real login has never gotten that far yet -- only the method-choice step has
-real data to go on.
+Login, 2FA, and table-scrape selectors are all confirmed against real
+markup captured from live runs, not guesses: CenterPoint uses Azure AD
+B2C's default self-asserted sign-in template
+(#signInName/#password/#rememberMe/#next are the platform's own field IDs).
+The 2FA email (sender, subject, code format) is confirmed against a real
+captured message -- it's Microsoft's own Azure B2C verification-email
+service, not a centerpointenergy.com address. The full 2FA flow -- the MFA
+method-choice page (a visible custom radio layer proxies a hidden real
+field), the code-entry page's separate "Send Code" button (nothing is sent
+until it's clicked), and the verify-code submission itself -- is confirmed
+end-to-end against a live run that reused a session established by a prior
+run's real login.
 """
 
 import asyncio
@@ -170,21 +169,18 @@ STATISTIC_ID = "centerpoint_gas:cycle_usage_ccf"
 
 # HA's Energy Dashboard gas-source unit picker accepts volume units
 # (CCF/ft³/L/MCF/m³) and energy units (cal/Gcal/GJ/GWh/J/kcal/kJ/kWh/Mcal/MJ/
-# mWh/MWh/TWh/Wh) -- confirmed directly against a real HA instance -- but NOT
-# therms directly.
+# mWh/MWh/TWh/Wh) -- confirmed directly against a real HA instance.
 #
-# IMPORTANT: unlike the exact therm<->kWh conversion this replaced (a fixed
-# physical definition, no ambiguity), therm<->CCF depends on the actual
-# heating value (BTU/cubic-foot) of the specific gas delivered, which varies
-# by region/season/supplier -- CenterPoint's own billing-history table never
-# exposes the exact factor it used for a given cycle, only Therms and the
-# cumulative Meter Reading (already in therm-equivalent units). 1.037 is a
-# commonly-cited industry-average heating value (source:
-# https://www.paenergyratings.com/resources/natural-gas-units), not this
-# account's actual real factor for any given cycle -- expect the resulting
-# CCF figures to be off by roughly 1-2% from what CenterPoint's own systems
-# would show as the true metered volume.
-THERM_TO_CCF = 1.037
+# NOTE: earlier versions (0.3.0-0.3.10) assumed this column was Therms and
+# applied an estimated THERM_TO_CCF = 1.037 conversion (a commonly-cited
+# industry-average heating value, not this account's real factor). A live
+# run's own captured table header confirmed the real column is already
+# labeled "CCF" directly -- CenterPoint reports it in the target unit
+# already, so no conversion is needed or applied. If you were running an
+# affected version, re-import with a wider `cycles_back` once to overwrite
+# any previously-imported cycles that were inflated by that ~3.7% factor --
+# HA's statistics import overwrites existing entries by date rather than
+# duplicating them, so this self-corrects without a new statistic_id.
 
 
 # ─── Gmail 2FA code retrieval ──────────────────────────────────────────────────
@@ -538,10 +534,13 @@ async def _login_with_2fa(page):
 
 
 async def scrape_billing_history(page):
-    # TODO: confirmed structure is Reading Date / Meter Reading / Therms /
-    # Charges columns, but the table's real selector/markup is unconfirmed --
-    # this matches by visible header text rather than a guessed CSS
-    # selector, which should be more resilient to markup we haven't seen.
+    # Confirmed via a live run's own captured table: Reading Date / Meter
+    # Reading / CCF / Charges columns. (Earlier versions looked for
+    # "Therms" here, based on an unconfirmed guess that turned out wrong --
+    # the real column is labeled "CCF" directly, which is also why the
+    # THERM_TO_CCF conversion above this function was removed entirely.)
+    # Matches by visible header text rather than a guessed CSS selector,
+    # which should be more resilient to markup changes.
     #
     # Wait explicitly for the header text rather than relying solely on
     # "networkidle" from the caller's page.goto -- a client-rendered table
@@ -558,7 +557,7 @@ async def scrape_billing_history(page):
             const tables = Array.from(document.querySelectorAll('table'));
             for (const table of tables) {
                 const headerText = table.innerText.slice(0, 500);
-                if (headerText.includes('Reading Date') && headerText.includes('Therms')) {
+                if (headerText.includes('Reading Date') && headerText.includes('CCF')) {
                     return {
                         rows: Array.from(table.querySelectorAll('tbody tr')).map(
                             tr => Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim())
@@ -640,7 +639,7 @@ def parse_billing_rows(raw_rows):
     for row in raw_rows:
         if len(row) < 3:
             continue
-        reading_date_str, meter_reading_str, therms_str = row[0], row[1], row[2]
+        reading_date_str, meter_reading_str, ccf_str = row[0], row[1], row[2]
         try:
             reading_date = datetime.strptime(reading_date_str.strip(), _ROW_DATE_FORMAT).date()
         except ValueError:
@@ -649,7 +648,7 @@ def parse_billing_rows(raw_rows):
         entries.append({
             "date": reading_date,
             "meter_reading": float(meter_reading_str.replace(",", "")),
-            "therms": float(therms_str.replace(",", "")),
+            "ccf": float(ccf_str.replace(",", "")),
         })
     return entries
 
@@ -677,19 +676,19 @@ def compute_statistics_entries(billing_rows, tz):
 
     for i, row in enumerate(ordered):
         cur_date = row["date"]
-        cur_sum_ccf = round(row["meter_reading"] * THERM_TO_CCF, 3)
+        cur_sum_ccf = row["meter_reading"]
 
         if i == 0:
             start = datetime.combine(cur_date, datetime.min.time()).replace(tzinfo=tz)
             entries.append({
                 "start": start.isoformat(),
-                "state": round(row["therms"] * THERM_TO_CCF, 3),
+                "state": row["ccf"],
                 "sum": cur_sum_ccf,
             })
             continue
 
         prev_date = ordered[i - 1]["date"]
-        prev_sum_ccf = round(ordered[i - 1]["meter_reading"] * THERM_TO_CCF, 3)
+        prev_sum_ccf = ordered[i - 1]["meter_reading"]
         cycle_days = (cur_date - prev_date).days
         if cycle_days <= 0:
             log.warning("Skipping row with non-increasing reading date: %s", cur_date)
@@ -697,9 +696,10 @@ def compute_statistics_entries(billing_rows, tz):
 
         daily_ccf = round((cur_sum_ccf - prev_sum_ccf) / cycle_days, 3)
         log.info(
-            "Spreading %.3f CCF (estimated, see THERM_TO_CCF) evenly across "
-            "%d day(s) between %s and %s (%.3f CCF/day -- an averaged "
-            "estimate, not measured daily usage)",
+            "Spreading %.3f CCF evenly across %d day(s) between %s and %s "
+            "(%.3f CCF/day -- an averaged estimate at the daily level only; "
+            "the cycle total itself is the real metered figure, not "
+            "estimated)",
             cur_sum_ccf - prev_sum_ccf, cycle_days, prev_date, cur_date, daily_ccf,
         )
 
@@ -740,7 +740,7 @@ async def import_cycle_statistics(entries):
         "type": "recorder/import_statistics",
         "metadata": {
             "has_sum": True,
-            "name": "CenterPoint Gas Usage (CCF, estimated)",
+            "name": "CenterPoint Gas Usage (CCF)",
             "source": "centerpoint_gas",
             "statistic_id": STATISTIC_ID,
             "unit_of_measurement": "CCF",

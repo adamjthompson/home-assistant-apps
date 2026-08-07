@@ -10,36 +10,23 @@ shows an accurate gas consumption source.
 CenterPoint's billing-history page shows a table like this:
 
 ```
-Reading Date   Meter Reading   Therms   Charges
-Jul 06,2026    4851            21       $76.89
-Jun 03,2026    4830            20       $76.24
-May 05,2026    4810            27       $81.41
+Reading Date   Meter Reading   CCF   Charges
+Jul 06,2026    4851            21    $76.89
+Jun 03,2026    4830            20    $76.24
+May 05,2026    4810            27    $81.41
 ```
 
 Unlike a typical interval-usage export, `Meter Reading` here is already the
-absolute cumulative total in the same unit as `Therms` (`4783 -> 4830 = 47`
+absolute cumulative total in the same unit as `CCF` (`4783 -> 4830 = 47`
 matches two months' combined usage, etc.) -- CenterPoint hands over both the
-period value and the running total directly, so each row can be imported as
-a fully self-contained statistics entry with no local cumulative-sum ledger
-needed.
+period value and the running total directly, already in CCF, so each row
+can be imported as a fully self-contained statistics entry with no local
+cumulative-sum ledger and no unit conversion needed.
 
-Therms are converted to **CCF** before import: Home Assistant's Energy
-Dashboard gas-source unit picker accepts volume units (CCF, ft³, L, MCF, m³)
-and energy units (kWh, MWh, GJ, etc.) but not therms directly, and CCF is
-what a CenterPoint bill actually shows, so this add-on converts
-(`CCF = therms × 1.037`, a commonly-cited industry-average natural-gas
-heating value).
-
-**This conversion is an estimate, not an exact figure.** Unlike a
-therm-to-kWh conversion (a fixed physical definition with no ambiguity),
-the real therm-to-CCF ratio depends on the actual heating value of the gas
-delivered, which varies by region/season/supplier -- CenterPoint's own
-billing-history table never exposes the specific factor it used for a given
-cycle, only `Therms` and the cumulative `Meter Reading` (already in
-therm-equivalent units). Expect the imported CCF figures to be off by
-roughly 1-2% from what CenterPoint's own systems would show as the true
-metered volume. This is flagged in the statistic's own display name
-("CenterPoint Gas Usage (CCF, estimated)"), not just here.
+(An earlier version incorrectly assumed this column was Therms and applied
+an estimated Therms-to-CCF conversion -- confirmed wrong via a live run's
+own captured table header, which reads "CCF" directly. See CHANGELOG 0.4.0
+if you're upgrading from an affected version.)
 
 Meter-read cycles run roughly every 28-33 days, and the read date itself
 floats (observed 3rd-7th of the month on this account), so cycle boundaries
@@ -61,34 +48,37 @@ its own reading date instead.
 ### Login and 2FA
 
 CenterPoint's login can challenge with a verification code, though not on
-every login -- the site appears to remember the device for a while. A real
-manual login confirmed the actual flow has an extra step this add-on didn't
-originally account for: after credentials are accepted, an intermediate
-"Multi-factor Authentication" page asks whether to send the code via
-**Phone** (pre-selected by default) or **Email** -- no code is sent until
-you pick one and continue. To handle it without manual intervention *if* it
-happens:
+every login -- the site remembers the device for a while, and successful
+runs keep extending that trust window (see below). The full flow, confirmed
+end-to-end against live runs:
 
 1. The app persists the browser session (cookies) to
    `/data/centerpoint_state.json` after every successful login. Most runs
    reuse that session and skip login/2FA entirely.
-2. If a fresh login is needed and the MFA method-choice page appears, the
-   app explicitly selects **Email** (Phone isn't an option here, since only
-   Gmail-based retrieval is implemented), then reads the verification code
-   directly from a Gmail inbox via IMAP, using an app password -- **but
-   only if `gmail_address`/`gmail_app_password` are configured.** Both are
+2. If a fresh login is needed, an intermediate "Multi-factor Authentication"
+   page asks whether to send the code via **Phone** (pre-selected by
+   default) or **Email**. The app selects Email (Phone isn't an option
+   here, since only Gmail-based retrieval is implemented).
+3. The page that follows doesn't send anything until a separate **Send
+   Code** button is clicked -- the app clicks it, waits for the code field
+   to become enabled, then reads the verification code directly from a
+   Gmail inbox via IMAP, using an app password -- **but only if
+   `gmail_address`/`gmail_app_password` are configured.** Both are
    optional; if 2FA is ever challenged with these left blank, the run fails
    with a clear log message telling you to either configure them or log
    into CenterPoint manually once to refresh the remembered-device session,
    rather than crashing confusingly.
+4. The code is submitted and the app waits for the login domain to
+   actually be left before continuing, since that final verification step
+   is asynchronous too.
 
 **Security note:** the Gmail app password grants IMAP read access to the
 *entire* mailbox, not just CenterPoint's emails -- there's no way to scope an
 app password more narrowly than that. If you'd rather not grant that to your
 everyday inbox, a dedicated Gmail account used only for utility/2FA mail is
-a stronger isolation option, though that's up to you. Given 2FA hasn't been
-observed to trigger at all so far, leaving these blank until/unless it
-actually happens is a completely reasonable choice.
+a stronger isolation option, though that's up to you. If 2FA rarely
+triggers for your account, leaving these blank until/unless it actually
+happens is a completely reasonable choice.
 
 ## Installation
 
@@ -164,56 +154,43 @@ a matching update.
 ## Home Assistant statistics
 
 Each run imports gas usage into the external statistic
-`centerpoint_gas:cycle_usage_ccf` (in CCF -- see the estimate caveat above).
-To use it:
+`centerpoint_gas:cycle_usage_ccf` (in real, metered CCF -- see "How it
+works" above). To use it:
 
 1. Go to **Settings → Dashboards → Energy**
 2. Under "Gas consumption", add a source and select
-   **CenterPoint Gas Usage (CCF, estimated)** (`centerpoint_gas:cycle_usage_ccf`)
+   **CenterPoint Gas Usage (CCF)** (`centerpoint_gas:cycle_usage_ccf`)
 
 Because each day's cumulative total is computed fresh from the real,
 absolute meter readings each run (not built up from a locally-tracked
 running total), re-running with any `cycles_back` value is always safe --
 HA overwrites existing entries by date rather than duplicating them, and
 there's no equivalent of the "widening `days_back` can corrupt history"
-caveat that applies to interval-based statistics.
+caveat that applies to interval-based statistics. **If you installed a
+version before 0.4.0**, the cycles it already imported were inflated by
+~3.7% (see CHANGELOG 0.4.0) -- temporarily raise `cycles_back` once to
+re-cover and overwrite them with correct values.
 
 ## First-run debugging
 
 **The full pipeline is confirmed working end-to-end against the live
-site**: Login, the account-home-to-billing-history navigation (click "View
-Usage", then "View Historical Energy Usage"), the table scrape, and the
-statistics import have all succeeded on a real run. The 2FA email itself is
-also confirmed against a real captured message: it's sent by
+site**, including a fresh login through the entire 2FA flow (method
+choice, Send Code, email retrieval, code verification) and a reused
+remembered-device session on a later run. The 2FA email itself is
+confirmed against a real captured message: sent by
 `msonlineservicesteam@microsoftonline.com` (Microsoft's own Azure B2C
 verification-email service, not a centerpointenergy.com address) with
 subject "CenterPoint Energy account email verification code" and a 6-digit
-code in the body -- `_search_gmail_for_code` matches on the real sender/
-subject now, not a generic guess.
+code in the body.
 
-**The full 2FA flow is now DOM-confirmed end-to-end** via real captures
-from live runs, not guesses. On the method-choice page, CenterPoint renders
-the real B2C field (`#mfaMethod_email`) hidden (`display: none`) and shows
-a separate custom-styled clickable layer (`#custom_email`) instead -- the
-app checks `#custom_email` first (a normal, real click) and force-checks
-`#mfaMethod_email` as a backup, then submits via the confirmed `#continue`
-button. The page that follows pre-renders `#verificationCode` in the DOM
-already (disabled), and doesn't actually send anything until a separate
-**Send Code** button is clicked -- easy to miss, since a plain
-DOM-presence check for `#verificationCode` looks satisfied even though no
-email has been requested yet. The app clicks Send Code, waits for the
-field to become enabled, then fetches the code from Gmail and submits via
-the confirmed Verify Code button.
-
-If a run fails, check the log. Both `_navigate_to_billing_history` and
-`scrape_billing_history` log the actual page text/links on failure (not
-saved to a file, just to the container log) specifically so a failure here
-is diagnosable without needing a screenshot.
+If a run fails, check the log. `_navigate_to_billing_history` and
+`scrape_billing_history` both log the actual page text/links on failure
+(not saved to a file, just to the container log) specifically so a failure
+here is diagnosable without needing a screenshot.
 
 ## Notes
 
 - This app is not affiliated with CenterPoint Energy or Google.
-- Only tested against a single-meter residential account. The full pipeline
-  (login, navigation, scrape, statistics import) is confirmed working
-  end-to-end against the live site; the 2FA path has not yet been exercised
-  for real (see "First-run debugging" above).
+- Only tested against a single-meter residential account. The full
+  pipeline -- login, the full 2FA flow, navigation, scrape, and statistics
+  import -- is confirmed working end-to-end against the live site.
