@@ -478,6 +478,38 @@ async def _login_with_2fa(page):
         if await submit_button.count() == 0:
             submit_button = page.get_by_role("button", name="Verify Code")
         await submit_button.first.click()
+
+        # Confirmed via a live run: clicking Verify Code did not raise any
+        # error, yet the run failed two steps later back on the plain
+        # sign-in page instead of an authenticated one -- the same async-
+        # submission race already fixed twice earlier in this exact flow
+        # (credentials submit, then the MFA method-choice Continue click).
+        # This page even has its own `<div class="working">` spinner
+        # element, confirming the verification itself is async here too.
+        # wait_for_load_state("load") alone can resolve before that
+        # finishes, and scrape_gas_usage's own immediate re-navigation back
+        # to account home right after this function returns then interrupts
+        # whatever redirect was still in flight, restarting the OAuth
+        # dance from scratch. Wait to actually leave the login domain
+        # before returning.
+        try:
+            await page.wait_for_function(
+                "() => !location.host.includes('login.centerpointenergy.com')",
+                timeout=30_000,
+            )
+        except Exception:
+            body_snippet = await _safe_body_text(page)
+            log.error(
+                "Still on the login domain 30s after submitting the "
+                "verification code -- likely an invalid/expired code (the "
+                "page text below should say so directly if that's the "
+                "case), or the submission didn't register. Page text: %r",
+                body_snippet,
+            )
+            raise RuntimeError(
+                "Verification-code submission did not leave the login "
+                "domain -- see logged page text above"
+            )
         await page.wait_for_load_state("load")
     elif "login.centerpointenergy.com" in page.url:
         body_snippet = await _safe_body_text(page)

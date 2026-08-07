@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.9
+
+- Now waits to actually leave the login domain before returning, same as the credentials-submit and MFA-method-choice steps already do, with a clear error (and the page's own text, which should state directly if the code was wrong) if it doesn't within 30s.
+
 ## 0.3.8
 
 - CenterPoint doesn't send anything until a separate, previously-unknown **"Send Code"** button is clicked. The code went straight to polling Gmail every run, for an email CenterPoint had never been asked to send. Now clicks Send Code first and waits for the field to become enabled before fetching from Gmail. Also corrected this page's real submit-button id, `#..._but_verify_code` (class="verifyCode"), replacing the previous unconfirmed `#next` guess.
