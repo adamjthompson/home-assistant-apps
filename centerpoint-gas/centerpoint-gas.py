@@ -356,6 +356,23 @@ async def _login_with_2fa(page):
         email_option = page.get_by_text("Email", exact=True)
     await email_option.first.click()
     await page.get_by_role("button", name="Continue").click()
+
+    # Confirmed via a live run: clicking Continue shows a "Please Wait...
+    # do not close this window" processing overlay while the code is
+    # actually being sent -- the same class of issue as the initial
+    # credentials submission (an async JS handler, not a plain page load),
+    # so wait_for_load_state("load") alone can resolve before that overlay
+    # clears and the real next page replaces it. Wait for the overlay text
+    # to disappear first; fall through to the diagnostic dump below either
+    # way if it doesn't within the timeout, same pattern as
+    # scrape_billing_history's wait for "Reading Date".
+    try:
+        await page.wait_for_function(
+            "() => !document.body || !document.body.innerText.includes('Please Wait')",
+            timeout=30_000,
+        )
+    except Exception:
+        pass
     await page.wait_for_load_state("load")
 
     # TODO: unconfirmed -- the actual code-entry page has never been seen,

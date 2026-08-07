@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- After selecting Email and clicking Continue on the MFA method-choice page, the page showed a "Please Wait... do not close this window" processing overlay while the code was actually being sent, but the code checked for the verification-code field immediately, before that overlay cleared; the same class of issue as the initial credentials submission (an async JS handler, not a plain page load), just recurring one step later. Now waits for the "Please Wait" text to clear before checking for the code field, falling through to the existing diagnostic dump either way if it doesn't clear in time.
+
 ## 0.3.3
 
 - A diagnostic `page.evaluate("() => document.body.innerText...")` call, meant to log page text after a failure, itself crashed with `Cannot read properties of null (reading 'innerText')`, landing in a transient window (likely right after the MFA method-choice page's redirect) where `document.body` didn't exist yet, or the execution context had already been torn down by a navigation. That crash masked whatever the original failure actually was, since it replaced the real error entirely. Added `_safe_body_text`, a null-safe, exception-tolerant wrapper now used everywhere this add-on takes a diagnostic page-text snapshot. It degrades gracefully (returning a clearly-labeled placeholder string) instead of ever crashing itself, since diagnostic code exists to explain a failure, not cause a new one.
