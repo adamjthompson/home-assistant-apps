@@ -631,7 +631,9 @@ async def scrape_gas_usage():
 
 # ─── Table parsing ─────────────────────────────────────────────────────────────
 
-_ROW_DATE_FORMAT = "%b %d,%Y"  # e.g. "Jul 06,2026"
+# Confirmed via a live run's own captured rows: the real format has a space
+# after the comma ("Jul 06, 2026"), not "Jul 06,2026" as originally assumed.
+_ROW_DATE_FORMAT = "%b %d, %Y"
 
 
 def parse_billing_rows(raw_rows):

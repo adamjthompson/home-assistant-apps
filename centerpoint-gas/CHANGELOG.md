@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Every row failed to parse on the table-scrape step: `_ROW_DATE_FORMAT` assumed "Jul 06,2026" (no space after the comma), but the real scraped text is "Jul 06, 2026" (with a space). Fixed the format string (`"%b %d, %Y"`) -- confirmed directly against the real captured rows in the failing run's own log.
+
 ## 0.4.0
 
 - The scraped figures are used as-is now, and are the real metered values, not an estimate. The statistic's display name drops its "(CCF, estimated)" qualifier accordingly (daily-level spreading within a cycle is still an estimate, as always; the cycle totals themselves are not). Also fixed the table-detection check itself to match on `"CCF"` instead of `"Therms"`. **If you're upgrading from an affected version (0.3.0-0.3.10) and already have imported statistics**, temporarily raise `cycles_back` once on your next run so it re-covers however many cycles were imported under the old, inflated logic -- HA's statistics import overwrites existing entries by date rather than duplicating them, so this self-corrects under the same `centerpoint_gas:cycle_usage_ccf` statistic_id with no migration needed.
