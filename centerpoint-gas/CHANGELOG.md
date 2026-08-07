@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.5
+
+- Fixed the actual root cause of the "verification-code field not found" failure: the field exists (`{'name': '', 'id': 'verificationCode', 'type': 'text'}`) but its `name` attribute is blank, so the previous `input[name="verificationCode"]` selector could never match it. Switched to `#verificationCode` (by id), matching the same convention already confirmed for `#signInName`/`#password`/`#rememberMe`/`#next`. This page also re-displays a `#signInName` field alongside the code field, now filled defensively (only if present, enabled, and empty) since it's unclear whether it's read-only or a real input. The submit button tries `#next` first (matching the sign-in page's convention) and falls back to the visible "Continue" text.
+
 ## 0.3.4
 
 - After selecting Email and clicking Continue on the MFA method-choice page, the page showed a "Please Wait... do not close this window" processing overlay while the code was actually being sent, but the code checked for the verification-code field immediately, before that overlay cleared; the same class of issue as the initial credentials submission (an async JS handler, not a plain page load), just recurring one step later. Now waits for the "Please Wait" text to clear before checking for the code field, falling through to the existing diagnostic dump either way if it doesn't clear in time.

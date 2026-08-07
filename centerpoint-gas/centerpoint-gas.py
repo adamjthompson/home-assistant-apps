@@ -375,14 +375,33 @@ async def _login_with_2fa(page):
         pass
     await page.wait_for_load_state("load")
 
-    # TODO: unconfirmed -- the actual code-entry page has never been seen,
-    # only the preceding method-choice step has. Update the selector once
-    # seen for real; the diagnostic dump below should give what's needed.
-    if await page.locator('input[name="verificationCode"]').count() > 0:
+    # Confirmed via a live run's diagnostic dump: this field's `name`
+    # attribute is blank ({'name': '', 'id': 'verificationCode', ...}), so
+    # input[name="verificationCode"] could never match -- #verificationCode
+    # (by id) is correct, matching the same convention already confirmed
+    # for #signInName/#password/#rememberMe/#next. The same dump also
+    # showed this page re-displays a #signInName field alongside the code
+    # field -- filled defensively (only if present, enabled, and empty)
+    # since it's unclear whether it's a read-only display or a real input.
+    if await page.locator("#verificationCode").count() > 0:
         log.info("2FA challenge detected, fetching code from Gmail")
         code = await fetch_2fa_code(after_time=login_start_time)
-        await page.fill('input[name="verificationCode"]', code)
-        await page.click('button[type="submit"]')
+
+        signin_field = page.locator("#signInName")
+        if await signin_field.count() > 0 and not await signin_field.is_disabled():
+            if not await signin_field.input_value():
+                await signin_field.fill(CENTERPOINT_USERNAME)
+
+        await page.fill("#verificationCode", code)
+        # TODO: unconfirmed -- #next matches the same submit-button
+        # convention already confirmed on the sign-in page, but this
+        # specific page's button has never been directly inspected. Falls
+        # back to text-based matching on the visible "Continue" label if
+        # #next isn't there.
+        submit_button = page.locator("#next")
+        if await submit_button.count() == 0:
+            submit_button = page.get_by_role("button", name="Continue")
+        await submit_button.first.click()
         await page.wait_for_load_state("load")
     elif "login.centerpointenergy.com" in page.url:
         body_snippet = await _safe_body_text(page)
