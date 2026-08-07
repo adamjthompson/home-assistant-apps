@@ -122,7 +122,19 @@ async def _safe_body_text(page, limit=2000):
 async def _navigate_to_billing_history(page):
     for step_text in _USAGE_NAV_STEPS:
         locator = page.get_by_text(step_text, exact=False)
-        if await locator.count() == 0:
+        # Confirmed via a live run reaching this page for the first time
+        # (everything before it, including the full 2FA flow, now works):
+        # the account-summary page's body text was just the header and a
+        # cookie-consent banner, with no dashboard content anywhere -- not
+        # a CSS overlay hiding it, since that wouldn't remove text from
+        # innerText, but the real content genuinely not rendered into the
+        # DOM yet. locator.count() checks instantly with no wait at all
+        # (unlike .click()'s own auto-wait), so a slow-rendering dashboard
+        # here was always going to fail this check regardless of how long
+        # it would've eventually taken. Wait explicitly instead.
+        try:
+            await locator.first.wait_for(state="visible", timeout=20_000)
+        except Exception:
             body_snippet = await _safe_body_text(page)
             all_links = await page.evaluate(
                 "() => Array.from(document.querySelectorAll('a')).map(a => a.innerText.trim()).filter(Boolean)"

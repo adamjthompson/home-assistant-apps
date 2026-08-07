@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.10
+
+- The full login + 2FA flow is now confirmed working. Now waits explicitly (up to 20s) for each nav-step link to become visible, falling through to the same diagnostic dump only if that times out.
+
 ## 0.3.9
 
 - Now waits to actually leave the login domain before returning, same as the credentials-submit and MFA-method-choice steps already do, with a clear error (and the page's own text, which should state directly if the code was wrong) if it doesn't within 30s.
