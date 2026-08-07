@@ -233,6 +233,33 @@ async def fetch_2fa_code(after_time, timeout_seconds=60, poll_interval=5):
 
 # ─── Browser automation ───────────────────────────────────────────────────────
 
+async def _goto_checked(page, url, **kwargs):
+    """page.goto() that fails loudly on a non-2xx/3xx response.
+
+    Confirmed necessary after a live run where CenterPoint's account-home
+    URL returned a plain HTTP 404 -- _needs_login only distinguishes "login
+    page" from "not login page", so a 404 (or any other error page) sailed
+    through as if it were a successful, authenticated page, and the real
+    failure only surfaced two steps later as a confusing "couldn't find the
+    View Usage link". This catches that class of failure immediately, with
+    the actual status code and page text logged right at the point it
+    happened.
+    """
+    response = await page.goto(url, **kwargs)
+    if response is not None and response.status >= 400:
+        body_snippet = await page.evaluate("() => document.body.innerText.slice(0, 500)")
+        log.error(
+            "Navigating to %s returned HTTP %d. Page text: %r",
+            url, response.status, body_snippet,
+        )
+        raise RuntimeError(
+            f"Navigating to {url} returned HTTP {response.status} -- "
+            f"either CenterPoint's site changed or this was a transient "
+            f"error, see logged page text above"
+        )
+    return response
+
+
 async def _needs_login(page):
     # Confirmed real domain/field for CenterPoint's Azure B2C sign-in page.
     if "login.centerpointenergy.com" in page.url:
@@ -362,7 +389,7 @@ async def scrape_gas_usage():
 
         try:
             log.info("Navigating to account home")
-            await page.goto(_B2C_REDIRECT_URI, wait_until="load")
+            await _goto_checked(page, _B2C_REDIRECT_URI, wait_until="load")
 
             if await _needs_login(page):
                 if "login.centerpointenergy.com" not in page.url:
@@ -370,9 +397,9 @@ async def scrape_gas_usage():
                     # navigate there explicitly rather than assume it always
                     # will.
                     log.info("Not auto-redirected to login -- navigating there directly")
-                    await page.goto(_build_login_url(), wait_until="load")
+                    await _goto_checked(page, _build_login_url(), wait_until="load")
                 await _login_with_2fa(page)
-                await page.goto(_B2C_REDIRECT_URI, wait_until="load")
+                await _goto_checked(page, _B2C_REDIRECT_URI, wait_until="load")
 
             await _navigate_to_billing_history(page)
             raw_rows = await scrape_billing_history(page)

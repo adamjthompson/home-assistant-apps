@@ -57,6 +57,13 @@ STATS_RETENTION_DAYS = DAYS_BACK + 2
 # ─── Browser automation ───────────────────────────────────────────────────────
 
 async def download_usage_export():
+    # Every wait below uses "load", not "networkidle" -- confirmed via a
+    # real run that networkidle can hang past its own timeout on
+    # real-world sites with persistent background network activity
+    # (analytics, heartbeats, etc.), even once the page itself has
+    # genuinely finished loading. "load" is a much more reliable signal
+    # that a page is actually usable (same fix applied to centerpoint-gas
+    # after it hit the identical failure mode).
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             executable_path=CHROMIUM_PATH,
@@ -68,11 +75,11 @@ async def download_usage_export():
 
         try:
             log.info("Logging into myprofile.aes-ohio.com")
-            await page.goto(LOGIN_URL, wait_until="networkidle")
+            await page.goto(LOGIN_URL, wait_until="load")
             await page.fill('input[name="ctl00$MainContent$LoginControl$UserName"]', AES_USERNAME)
             await page.fill('input[name="ctl00$MainContent$LoginControl$Password"]', AES_PASSWORD)
             await page.click('input[name="ctl00$MainContent$LoginControl$btnLogin"]')
-            await page.wait_for_load_state("networkidle")
+            await page.wait_for_load_state("load")
 
             # "PowerView" (the "My Usage" dropdown's link to Opower) opens in a new
             # tab via the SAML handoff (AES -> Oracle IDCS -> Opower). Its dropdown
@@ -81,14 +88,14 @@ async def download_usage_export():
             # in a new tab in the same (already-authenticated) browser context.
             log.info("Navigating to Your Energy Use")
             page = await context.new_page()
-            await page.goto("http://aeso.opower.com/ei/x/dashboard", wait_until="networkidle")
+            await page.goto("http://aeso.opower.com/ei/x/dashboard", wait_until="load")
             await page.wait_for_url(re.compile(r"aeso\.opower\.com"), timeout=45_000)
 
             # "Download my data" lives on the energy-use-details page, not the
             # dashboard -- the dashboard goto above only establishes the
             # authenticated Opower session.
             log.info("Navigating to Energy Use Details")
-            await page.goto("https://aeso.opower.com/ei/x/energy-use-details/", wait_until="networkidle")
+            await page.goto("https://aeso.opower.com/ei/x/energy-use-details/", wait_until="load")
 
             log.info("Opening 'Download my data'")
             await page.get_by_text("Download my data", exact=False).click()
