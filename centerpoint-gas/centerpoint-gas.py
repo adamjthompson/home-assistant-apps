@@ -420,7 +420,45 @@ async def _login_with_2fa(page):
     # showed this page re-displays a #signInName field alongside the code
     # field -- filled defensively (only if present, enabled, and empty)
     # since it's unclear whether it's a read-only display or a real input.
+    #
+    # Root cause of three straight runs with correct Email selection but no
+    # email ever arriving, confirmed via a real DOM capture: this page
+    # pre-renders #verificationCode in the DOM already (so the old
+    # `.count() > 0` check here was always true) but it starts out
+    # `disabled`, and CenterPoint doesn't actually send anything until a
+    # separate "Send Code" button
+    # (#..._but_send_code, class="sendCode") is clicked. The previous code
+    # had no idea this button existed and went straight to polling Gmail
+    # for a code that was never requested. Click it first, then wait for
+    # the field to actually become enabled before treating a code as sent.
     if await page.locator("#verificationCode").count() > 0:
+        send_code_button = page.locator(
+            "#PromptEmailPage-Step-01-OtpEmailVerificationControl_but_send_code"
+        )
+        if await send_code_button.count() == 0:
+            send_code_button = page.get_by_role("button", name="Send Code")
+        if await send_code_button.count() > 0:
+            log.info("Clicking Send Code to actually trigger the 2FA email")
+            await send_code_button.first.click()
+        else:
+            log.warning(
+                "Send Code button not found -- CenterPoint may have already "
+                "sent a code, or this page revision has changed."
+            )
+
+        try:
+            await page.wait_for_function(
+                "() => { const el = document.querySelector('#verificationCode');"
+                " return el && !el.disabled; }",
+                timeout=15_000,
+            )
+        except Exception:
+            log.warning(
+                "#verificationCode is still disabled 15s after clicking Send "
+                "Code -- proceeding anyway, since fetch_2fa_code's own "
+                "timeout is the real signal of whether this worked."
+            )
+
         log.info("2FA challenge detected, fetching code from Gmail")
         code = await fetch_2fa_code(after_time=login_start_time)
 
@@ -430,14 +468,15 @@ async def _login_with_2fa(page):
                 await signin_field.fill(CENTERPOINT_USERNAME)
 
         await page.fill("#verificationCode", code)
-        # TODO: unconfirmed -- #next matches the same submit-button
-        # convention already confirmed on the sign-in page, but this
-        # specific page's button has never been directly inspected. Falls
-        # back to text-based matching on the visible "Continue" label if
-        # #next isn't there.
-        submit_button = page.locator("#next")
+        # Confirmed via the same DOM capture as the Send Code button above:
+        # this page's real submit control is #..._but_verify_code
+        # (class="verifyCode"), not #next -- #next belongs to the earlier
+        # sign-in page's form, not this one.
+        submit_button = page.locator(
+            "#PromptEmailPage-Step-01-OtpEmailVerificationControl_but_verify_code"
+        )
         if await submit_button.count() == 0:
-            submit_button = page.get_by_role("button", name="Continue")
+            submit_button = page.get_by_role("button", name="Verify Code")
         await submit_button.first.click()
         await page.wait_for_load_state("load")
     elif "login.centerpointenergy.com" in page.url:

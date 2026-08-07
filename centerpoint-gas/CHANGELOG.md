@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.8
+
+- CenterPoint doesn't send anything until a separate, previously-unknown **"Send Code"** button is clicked. The code went straight to polling Gmail every run, for an email CenterPoint had never been asked to send. Now clicks Send Code first and waits for the field to become enabled before fetching from Gmail. Also corrected this page's real submit-button id, `#..._but_verify_code` (class="verifyCode"), replacing the previous unconfirmed `#next` guess.
+
 ## 0.3.7
 
 - DOM-confirmed fix for MFA method-choice selection, replacing 0.3.6's hedge. Now checks `#custom_email` first with a normal (non-forced) check, since it's really visible and this fires whatever click/change handler CenterPoint wired to it, then force-checks `#mfaMethod_email` as a redundant safety net. Also switched this page's Continue button from role/text matching to the confirmed real id, `#continue` (`<button id="continue" type="submit" form="attributeVerification">`.

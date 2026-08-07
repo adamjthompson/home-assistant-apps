@@ -191,15 +191,19 @@ subject "CenterPoint Energy account email verification code" and a 6-digit
 code in the body -- `_search_gmail_for_code` matches on the real sender/
 subject now, not a generic guess.
 
-**The MFA method-choice page and the verification-code page are both
-DOM-confirmed** via real captures from live runs, not guesses. On the
-method-choice page, CenterPoint renders the real B2C field
-(`#mfaMethod_email`) hidden (`display: none`) and shows a separate
-custom-styled clickable layer (`#custom_email`) instead -- the app checks
-`#custom_email` first (a normal, real click) and force-checks
+**The full 2FA flow is now DOM-confirmed end-to-end** via real captures
+from live runs, not guesses. On the method-choice page, CenterPoint renders
+the real B2C field (`#mfaMethod_email`) hidden (`display: none`) and shows
+a separate custom-styled clickable layer (`#custom_email`) instead -- the
+app checks `#custom_email` first (a normal, real click) and force-checks
 `#mfaMethod_email` as a backup, then submits via the confirmed `#continue`
-button. The code-entry field is `#verificationCode` (its `name` attribute
-is blank, so it must be selected by id).
+button. The page that follows pre-renders `#verificationCode` in the DOM
+already (disabled), and doesn't actually send anything until a separate
+**Send Code** button is clicked -- easy to miss, since a plain
+DOM-presence check for `#verificationCode` looks satisfied even though no
+email has been requested yet. The app clicks Send Code, waits for the
+field to become enabled, then fetches the code from Gmail and submits via
+the confirmed Verify Code button.
 
 If a run fails, check the log. Both `_navigate_to_billing_history` and
 `scrape_billing_history` log the actual page text/links on failure (not
