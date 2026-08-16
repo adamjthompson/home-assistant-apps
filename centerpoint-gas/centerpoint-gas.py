@@ -69,7 +69,13 @@ CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "/usr/bin/chromium-browser")
 _B2C_TENANT = "cnpcwecafprod.onmicrosoft.com"
 _B2C_POLICY = "b2c_1a_signuporsignin"
 _B2C_CLIENT_ID = "a6386527-7544-45d9-94e0-f0e22e480d15"
-_B2C_REDIRECT_URI = "https://myaccount.centerpointenergy.com/myaccounts/Index"
+# Bare domain root, not the specific /myaccounts/Index sub-path this used to
+# point at -- that sub-path is very likely why every single run all session
+# logged a "Navigating to .../myaccounts/Index returned HTTP 404" warning
+# (harmless in practice, since _goto_checked only warns, but pure noise).
+# Contributed via a community fork; adopted directly since it's a plausible,
+# low-risk fix for a real recurring symptom.
+_B2C_REDIRECT_URI = "https://myaccount.centerpointenergy.com"
 
 
 def _build_login_url():
@@ -318,6 +324,27 @@ async def _needs_login(page):
     if "login.centerpointenergy.com" in page.url:
         return True
     return await page.locator("#signInName").count() > 0
+
+
+async def _page_is_blank(page):
+    # Contributed via a community fork. A reused session that's expired server-side may
+    # render a totally blank account-home page (no content, no links)
+    # instead of redirecting to login, which _needs_login alone wouldn't
+    # catch (it only checks for the login domain or #signInName) -- that
+    # would otherwise surface several steps later as a confusing "couldn't
+    # find the View Usage link" failure, the same category of bug this
+    # whole login flow has hit repeatedly. Adopted as a low-risk hedge.
+    try:
+        await page.wait_for_function(
+            "() => (document.body ? document.body.innerText.trim().length : 0) > 0 "
+            "|| document.querySelectorAll('a').length > 0",
+            timeout=8_000,
+        )
+        return False
+    except Exception:
+        body_snippet = await _safe_body_text(page)
+        log.info("Account-home page is blank -- treating as expired session. Body: %r", body_snippet)
+        return True
 
 
 async def _login_with_2fa(page):
@@ -627,7 +654,7 @@ async def scrape_gas_usage():
             log.info("Navigating to account home")
             await _goto_checked(page, _B2C_REDIRECT_URI, wait_until="load")
 
-            if await _needs_login(page):
+            if await _needs_login(page) or await _page_is_blank(page):
                 if "login.centerpointenergy.com" not in page.url:
                     # The app didn't auto-redirect us to the sign-in page --
                     # navigate there explicitly rather than assume it always
