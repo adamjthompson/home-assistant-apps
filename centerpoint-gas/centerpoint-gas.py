@@ -226,7 +226,19 @@ def _search_gmail_for_code(after_time):
     try:
         imap.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         imap.select("INBOX", readonly=True)
-        since_str = after_time.strftime("%d-%b-%Y")
+        # Confirmed via a live run: SINCE only compares calendar dates, and
+        # IMAP servers bucket "which day" a message landed on using their
+        # own reference timezone (Gmail's doesn't necessarily match UTC),
+        # not the caller's. A run at 23:24 US-Eastern computed after_time
+        # (UTC) as already past midnight -- "16-Aug-2026" -- and the search
+        # came back completely empty despite the code email genuinely
+        # having arrived, because Gmail's own day-bucketing for a message
+        # received a few hours past UTC midnight can still land it on the
+        # prior day. Subtracting a 2-day buffer here only ever widens the
+        # candidate set; the actual correctness filter is the exact
+        # timestamp comparison below (msg_time < after_time), which is
+        # unaffected by this and still can't accept a stale code.
+        since_str = (after_time - timedelta(days=2)).strftime("%d-%b-%Y")
         status, data = imap.search(
             None, f'(SINCE "{since_str}" FROM "{_2FA_SENDER}" SUBJECT "{_2FA_SUBJECT}")'
         )

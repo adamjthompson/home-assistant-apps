@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5
+
+- 0.4.2's diagnostic logging paid off: a run at 23:24 US-Eastern showed the IMAP search using `SINCE 16-Aug-2026` and finding no messages at all, despite the user confirming the code email genuinely arrived. Not a subject-matching bug (subject search is already a substring match, confirmed correct weeks ago) and not a broken container clock either -- `after_time` in UTC really was already past midnight, so "16-Aug" was the mathematically correct date. The actual issue: IMAP `SINCE` only compares calendar dates, and mail servers bucket "which day" a message landed on using their own reference timezone, not the caller's -- a message received a few hours past UTC midnight can still land in the *prior* day from Gmail's own perspective, so a same-day `SINCE` cutoff right at that boundary can genuinely, correctly (server-side) exclude a real, freshly-arrived email. Now subtracts a 2-day buffer before computing `since_str`, which only ever widens the IMAP-level candidate set -- the real correctness filter is still the exact `msg_time < after_time` timestamp comparison further down, untouched by this change and still incapable of accepting a stale code.
+
 ## 0.4.4
 
 - A run's own diagnostic logging (added in 0.3.7) caught the MFA method-choice Email selection genuinely failing to stick: `custom_email: False, mfaMethod_email: False` after the check attempts, leaving neither Phone nor Email selected and permanently disabling Send Code (30s click timeout, button stayed `aria-disabled="true"` throughout). This exact selection had worked reliably on every other run today, so it reads as a one-off UI re-render race -- a forced check getting reverted by the page's own controlled-input logic -- rather than a logic bug. Now retries the click/force-check up to 3 times (500ms apart), verifying the checked state after each attempt and stopping as soon as either field sticks, instead of assuming a single attempt always works.
