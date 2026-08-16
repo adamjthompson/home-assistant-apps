@@ -225,8 +225,25 @@ def _search_gmail_for_code(after_time):
             None, f'(SINCE "{since_str}" FROM "{_2FA_SENDER}" SUBJECT "{_2FA_SUBJECT}")'
         )
         if status != "OK" or not data or not data[0]:
+            # Diagnostic added after a run timed out despite the user
+            # confirming a real, correctly-addressed/subjected email had
+            # arrived -- coinciding with an HA 2026.8 update, so a container
+            # clock/timezone regression affecting `after_time` (used for
+            # both this search and the per-message time filter below) is a
+            # real candidate worth being able to see directly, not guessed
+            # blindly.
+            log.info(
+                "Gmail IMAP search (SINCE %s, FROM %s, SUBJECT %r) returned "
+                "no messages at all (status=%s)",
+                since_str, _2FA_SENDER, _2FA_SUBJECT, status,
+            )
             return None
         message_ids = data[0].split()
+        log.info(
+            "Gmail IMAP search (SINCE %s) found %d candidate message(s); "
+            "after_time (the filter floor) is %s",
+            since_str, len(message_ids), after_time.isoformat(),
+        )
         for message_id in reversed(message_ids):
             status, msg_data = imap.fetch(message_id, "(RFC822)")
             if status != "OK" or not msg_data or not msg_data[0]:
@@ -234,6 +251,10 @@ def _search_gmail_for_code(after_time):
             msg = email_module.message_from_bytes(msg_data[0][1])
             msg_time = email_module.utils.parsedate_to_datetime(msg["Date"])
             if msg_time < after_time:
+                log.info(
+                    "Skipping candidate message dated %s -- before "
+                    "after_time %s", msg_time.isoformat(), after_time.isoformat(),
+                )
                 continue
             match = _CODE_RE.search(_extract_email_text(msg))
             if match:

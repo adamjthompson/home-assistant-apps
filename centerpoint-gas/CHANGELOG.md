@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- A run timed out waiting for the 2FA code despite the user confirming a real email had arrived with the exact expected sender (`msonlineservicesteam@microsoftonline.com`) and subject ("CenterPoint Energy account email verification code") -- ruling out a filter-drift explanation this time. This coincided with an HA 2026.8 update, making a container clock/timezone regression a real candidate: `after_time` (`datetime.now(timezone.utc)`, used both as the IMAP `SINCE` floor and the per-message filter) would silently exclude a genuinely-arrived email with no exception at all if the container's notion of "now" were off, exactly matching the clean timeout observed. Added diagnostic logging to `_search_gmail_for_code` -- how many candidates the IMAP search itself found, and each candidate's actual timestamp versus `after_time` -- to confirm or rule this out directly from the next run's log rather than guessing further.
+
 ## 0.4.1
 
 - Every row failed to parse on the table-scrape step: `_ROW_DATE_FORMAT` assumed "Jul 06,2026" (no space after the comma), but the real scraped text is "Jul 06, 2026" (with a space). Fixed the format string (`"%b %d, %Y"`) -- confirmed directly against the real captured rows in the failing run's own log.
