@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4
+
+- A run's own diagnostic logging (added in 0.3.7) caught the MFA method-choice Email selection genuinely failing to stick: `custom_email: False, mfaMethod_email: False` after the check attempts, leaving neither Phone nor Email selected and permanently disabling Send Code (30s click timeout, button stayed `aria-disabled="true"` throughout). This exact selection had worked reliably on every other run today, so it reads as a one-off UI re-render race -- a forced check getting reverted by the page's own controlled-input logic -- rather than a logic bug. Now retries the click/force-check up to 3 times (500ms apart), verifying the checked state after each attempt and stopping as soon as either field sticks, instead of assuming a single attempt always works.
+
 ## 0.4.3
 
 - Cherry-picked two fixes from a community fork (RedNetBaron/home-assistant-apps), skipping that fork's cost-tracking feature for now: (1) `_B2C_REDIRECT_URI` simplified from `.../myaccounts/Index` to the bare `myaccount.centerpointenergy.com` domain root -- very likely why every run all session has logged a harmless-but-noisy `HTTP 404` warning on that specific sub-path. (2) Added `_page_is_blank`, checked alongside `_needs_login`: a reused session that's expired server-side may render a totally blank account-home page instead of redirecting to login, which `_needs_login` alone wouldn't catch -- a plausible (not yet directly observed) explanation for the same "couldn't find View Usage link" failure mode this add-on has hit for other reasons already. Low-risk hedge, adopted as a precaution.

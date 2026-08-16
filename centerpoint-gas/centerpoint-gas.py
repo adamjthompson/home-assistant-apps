@@ -423,23 +423,49 @@ async def _login_with_2fa(page):
     # net, in case the hidden field isn't kept in sync purely by that
     # handler and the form submission still reads it directly.
     log.info("MFA method-choice page detected, selecting Email")
-    for selector in ("#custom_email", "#mfaMethod_email"):
-        locator = page.locator(selector)
-        if await locator.count() > 0:
+    # A live run's own diagnostic logging (added below) caught this
+    # selection genuinely failing to stick on one run -- both
+    # #custom_email and #mfaMethod_email came back unchecked afterward,
+    # leaving neither Phone nor Email selected and permanently disabling
+    # Send Code. This had worked reliably on every other run, so it reads
+    # as a one-off UI re-render race (the page reverting a forced check on
+    # its own controlled input) rather than a logic bug -- retries with
+    # verification instead of assuming a single attempt always sticks.
+    for attempt in range(1, 4):
+        custom_email = page.locator("#custom_email")
+        if await custom_email.count() > 0:
             try:
-                await locator.first.check(force=True)
+                await custom_email.first.click()
             except Exception as e:
-                log.warning("Could not check %s while selecting Email: %s", selector, e)
+                log.warning("Could not click #custom_email (attempt %d): %s", attempt, e)
         else:
-            log.warning("%s not found on the MFA method-choice page", selector)
+            log.warning("#custom_email not found on the MFA method-choice page")
 
-    log.info(
-        "Post-selection checked state -- custom_email: %s, mfaMethod_email: %s",
-        await page.locator("#custom_email").is_checked()
-        if await page.locator("#custom_email").count() > 0 else "not found",
-        await page.locator("#mfaMethod_email").is_checked()
-        if await page.locator("#mfaMethod_email").count() > 0 else "not found",
-    )
+        mfa_email = page.locator("#mfaMethod_email")
+        if await mfa_email.count() > 0:
+            try:
+                await mfa_email.first.check(force=True)
+            except Exception as e:
+                log.warning("Could not force-check #mfaMethod_email (attempt %d): %s", attempt, e)
+        else:
+            log.warning("#mfaMethod_email not found on the MFA method-choice page")
+
+        custom_checked = await custom_email.is_checked() if await custom_email.count() > 0 else False
+        mfa_checked = await mfa_email.is_checked() if await mfa_email.count() > 0 else False
+        log.info(
+            "Post-selection checked state (attempt %d) -- custom_email: %s, "
+            "mfaMethod_email: %s",
+            attempt, custom_checked, mfa_checked,
+        )
+        if custom_checked or mfa_checked:
+            break
+        await page.wait_for_timeout(500)
+    else:
+        log.warning(
+            "Email selection never stuck after 3 attempts -- proceeding "
+            "anyway. Send Code will likely stay disabled if neither method "
+            "ended up selected."
+        )
 
     # Confirmed via the real DOM: this page's submit button is
     # `<button id="continue" type="submit" form="attributeVerification">`,
