@@ -58,6 +58,11 @@ CENTERPOINT_PASSWORD = os.environ["CENTERPOINT_PASSWORD"]
 # all skipped it, cause unconfirmed). Not required for the add-on to work.
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
+# Opt-in inbox housekeeping: trash each 2FA email once its code has actually
+# been accepted. Off by default -- deleting mail is destructive and not
+# something to start doing to someone's mailbox without them asking. bashio
+# renders a bool config option as the literal string "true"/"false".
+DELETE_2FA_EMAIL = os.environ.get("DELETE_2FA_EMAIL", "false").strip().lower() == "true"
 CYCLES_BACK = int(os.environ.get("CYCLES_BACK", 3))
 
 CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "/usr/bin/chromium-browser")
@@ -255,7 +260,7 @@ def _search_gmail_for_code(after_time):
                 "no messages at all (status=%s)",
                 since_str, _2FA_SENDER, _2FA_SUBJECT, status,
             )
-            return None
+            return None, None
         message_ids = data[0].split()
         log.info(
             "Gmail IMAP search (SINCE %s) found %d candidate message(s); "
@@ -276,10 +281,119 @@ def _search_gmail_for_code(after_time):
                 continue
             match = _CODE_RE.search(_extract_email_text(msg))
             if match:
-                return match.group(1)
-        return None
+                # Message-ID rather than the sequence number/UID this loop is
+                # iterating: sequence numbers are only meaningful within this
+                # one selected-mailbox session, and the delete happens later,
+                # over a separate connection, after the code is accepted.
+                # Message-ID is stable and re-searchable. It's a required
+                # header in practice but not guaranteed present, so the
+                # delete path treats a missing one as "nothing to delete"
+                # rather than assuming.
+                return match.group(1), msg.get("Message-ID")
+        return None, None
     finally:
         imap.logout()
+
+
+def _delete_gmail_message(message_id):
+    r"""Move the 2FA email identified by `message_id` to Gmail's Trash.
+
+    Best-effort by design -- every caller runs this *after* a successful
+    login, so a failure here is inbox clutter, never a failed run.
+
+    Note this is Gmail-specific (as is the rest of this module's IMAP path,
+    which hardcodes imap.gmail.com): on Gmail, a plain \Deleted + EXPUNGE in
+    INBOX just removes the INBOX label -- archiving the message rather than
+    deleting it. Copying to the Trash mailbox is what actually trashes it,
+    and Gmail treats Trash as exclusive, so the copy removes it from INBOX
+    on its own. From there Google's own 30-day Trash retention applies; this
+    deliberately doesn't hard-purge.
+    """
+    imap = imaplib.IMAP4_SSL("imap.gmail.com")
+    try:
+        imap.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        trash = _find_trash_mailbox(imap)
+        if not trash:
+            log.warning(
+                "Could not identify the Gmail Trash mailbox -- leaving the "
+                "2FA email in place."
+            )
+            return False
+        # Writable this time; the code-search select() above stays readonly.
+        status, _ = imap.select("INBOX", readonly=False)
+        if status != "OK":
+            log.warning("Could not open INBOX writable (status=%s)", status)
+            return False
+        status, data = imap.search(None, f'(HEADER Message-ID "{message_id}")')
+        if status != "OK" or not data or not data[0]:
+            log.warning(
+                "2FA email %s not found on the delete pass (status=%s) -- "
+                "already moved or deleted?", message_id, status,
+            )
+            return False
+        deleted = 0
+        for msg_num in data[0].split():
+            status, _ = imap.copy(msg_num, trash)
+            if status != "OK":
+                log.warning(
+                    "Copying the 2FA email to %s failed (status=%s)",
+                    trash, status,
+                )
+                continue
+            # Gmail's Trash is exclusive, so the copy above should already
+            # have pulled it out of INBOX. Clearing the INBOX copy is a
+            # cheap hedge in case that behaviour doesn't hold (a non-default
+            # IMAP setting, say) and costs nothing when it's a no-op.
+            imap.store(msg_num, "+FLAGS", "\\Deleted")
+            deleted += 1
+        if deleted:
+            imap.expunge()
+            log.info("Moved the used 2FA email to %s", trash)
+            return True
+        return False
+    finally:
+        try:
+            imap.logout()
+        except Exception:
+            pass
+
+
+def _find_trash_mailbox(imap):
+    r"""Locate the Trash mailbox by its SPECIAL-USE \Trash attribute.
+
+    Not hardcoded to "[Gmail]/Trash" because Gmail localises those folder
+    names per account language (e.g. "[Gmail]/Papelera"), which would make a
+    literal string silently wrong for non-English accounts. Gmail advertises
+    SPECIAL-USE, so the attribute is the portable way to ask; the English
+    default is kept only as a last-resort fallback.
+    """
+    status, mailboxes = imap.list()
+    if status == "OK" and mailboxes:
+        for entry in mailboxes:
+            if isinstance(entry, bytes):
+                entry = entry.decode(errors="ignore")
+            if "\\Trash" in entry:
+                # Format: (\HasNoChildren \Trash) "/" "[Gmail]/Trash"
+                parts = entry.rsplit(' "', 1)
+                if len(parts) == 2:
+                    return '"' + parts[1]
+    return '"[Gmail]/Trash"'
+
+
+async def delete_2fa_email(message_id):
+    if not message_id:
+        log.warning(
+            "delete_2fa_email is enabled but the 2FA email had no Message-ID "
+            "header -- nothing to delete against."
+        )
+        return
+    try:
+        await asyncio.to_thread(_delete_gmail_message, message_id)
+    except Exception:
+        # Deliberately swallowed: the login already succeeded by this point,
+        # and failing the whole run over inbox housekeeping would be worse
+        # than leaving one email behind.
+        log.warning("Could not delete the used 2FA email", exc_info=True)
 
 
 async def fetch_2fa_code(after_time, timeout_seconds=60, poll_interval=5):
@@ -294,9 +408,9 @@ async def fetch_2fa_code(after_time, timeout_seconds=60, poll_interval=5):
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout_seconds
     while loop.time() < deadline:
-        code = await asyncio.to_thread(_search_gmail_for_code, after_time)
+        code, message_id = await asyncio.to_thread(_search_gmail_for_code, after_time)
         if code:
-            return code
+            return code, message_id
         await asyncio.sleep(poll_interval)
     raise RuntimeError("Timed out waiting for CenterPoint's 2FA code email")
 
@@ -554,7 +668,7 @@ async def _login_with_2fa(page):
             )
 
         log.info("2FA challenge detected, fetching code from Gmail")
-        code = await fetch_2fa_code(after_time=login_start_time)
+        code, code_message_id = await fetch_2fa_code(after_time=login_start_time)
 
         signin_field = page.locator("#signInName")
         if await signin_field.count() > 0 and not await signin_field.is_disabled():
@@ -605,6 +719,13 @@ async def _login_with_2fa(page):
                 "domain -- see logged page text above"
             )
         await page.wait_for_load_state("load")
+
+        # Only here, past the wait above -- leaving the login domain is this
+        # flow's own definition of "the code was accepted". Deleting any
+        # earlier would throw away an email that's still needed if the
+        # submission turns out to have failed and the code has to be re-read.
+        if DELETE_2FA_EMAIL:
+            await delete_2fa_email(code_message_id)
     elif "login.centerpointenergy.com" in page.url:
         body_snippet = await _safe_body_text(page)
         all_inputs = await page.evaluate(

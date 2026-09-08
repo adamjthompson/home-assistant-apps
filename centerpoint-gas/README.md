@@ -70,7 +70,9 @@ end-to-end against live runs:
    rather than crashing confusingly.
 4. The code is submitted and the app waits for the login domain to
    actually be left before continuing, since that final verification step
-   is asynchronous too.
+   is asynchronous too. That's also the point at which the code counts as
+   "used", so if `delete_2fa_email` is on, the email is trashed here and
+   not a moment earlier.
 
 **Security note:** the Gmail app password grants IMAP read access to the
 *entire* mailbox, not just CenterPoint's emails -- there's no way to scope an
@@ -98,6 +100,7 @@ centerpoint_username: "your-centerpoint-username"
 centerpoint_password: "your-centerpoint-password"
 gmail_address: ""
 gmail_app_password: ""
+delete_2fa_email: false
 cycles_back: 3
 run_interval_hours: 24
 ```
@@ -110,6 +113,17 @@ run_interval_hours: 24
   Leave both blank until/unless you actually see a 2FA-related failure in
   the log. `gmail_app_password` requires 2-Step Verification enabled on the
   Google account to generate (Google Account → Security → App passwords).
+- `delete_2fa_email` (default `false`) moves each verification-code email to
+  Gmail's Trash once its code has actually been accepted and the login has
+  gone through -- never before that, so if a submission fails the email is
+  still there to re-read. It's trashed rather than permanently erased, so
+  Google's usual 30-day Trash retention applies and an unwanted delete is
+  recoverable. Only relevant when `gmail_address`/`gmail_app_password` are
+  set and 2FA actually gets challenged; a delete that fails is logged as a
+  warning and never fails the run. Note that enabling this means the app
+  needs IMAP *write* access to the mailbox, not just read -- the same app
+  password already grants both, but it's the difference between the app
+  only being able to look at your mail and being able to modify it.
 - `cycles_back` controls how many recent meter-read cycles are (re-)imported
   each run (as daily-spread entries, not one entry per cycle -- see below).
   The billing-history table shows at most 24 rows and doesn't paginate, so
@@ -138,8 +152,10 @@ python3 centerpoint-gas/core.py
   Long-Lived Access Tokens** in Home Assistant), since there's no Supervisor
   to inject one automatically.
 - Every other config option (`gmail_address`, `gmail_app_password`,
-  `cycles_back`) is set the same way as the Supervisor add-on -- as an
-  environment variable, using the same names.
+  `delete_2fa_email`, `cycles_back`) is set the same way as the Supervisor
+  add-on -- as an environment variable, using the same names (uppercased).
+  `DELETE_2FA_EMAIL` is read as the literal string `true`; anything else,
+  including unset, leaves it off.
 - Run it on a schedule yourself (cron, systemd timer, etc.) -- there's no
   built-in loop here the way the Supervisor add-on's `run.sh` provides one,
   so `run_interval_hours` doesn't apply to this path.

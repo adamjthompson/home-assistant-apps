@@ -4,6 +4,7 @@ export CENTERPOINT_USERNAME=$(bashio::config 'centerpoint_username')
 export CENTERPOINT_PASSWORD=$(bashio::config 'centerpoint_password')
 export GMAIL_ADDRESS=$(bashio::config 'gmail_address')
 export GMAIL_APP_PASSWORD=$(bashio::config 'gmail_app_password')
+export DELETE_2FA_EMAIL=$(bashio::config 'delete_2fa_email')
 export CYCLES_BACK=$(bashio::config 'cycles_back')
 export RUN_INTERVAL_HOURS=$(bashio::config 'run_interval_hours')
 

@@ -11,6 +11,9 @@ configuration:
   gmail_app_password:
     name: Gmail App Password (optional)
     description: "Optional, only needed alongside gmail_address. A Gmail app password (not your regular Google password) used to read the 2FA code via IMAP when CenterPoint challenges a login. Requires 2-Step Verification enabled on the Google account to generate one. Note: this grants read access to the entire mailbox, not just CenterPoint's emails -- a dedicated Gmail account used only for utility 2FA mail is a stronger isolation option if you'd prefer not to grant access to your everyday inbox."
+  delete_2fa_email:
+    name: Delete 2FA Email After Use (optional)
+    description: "Optional inbox housekeeping, off by default. When on, the verification-code email is moved to Gmail's Trash once its code has actually been accepted and the login has completed -- never before, so a code is still available for a retry if the submission fails. Trashed rather than permanently erased, so Google's usual 30-day Trash retention still applies and a mistake is recoverable. Only does anything when gmail_address/gmail_app_password are set and CenterPoint actually challenges with 2FA; a failed delete is logged as a warning and never fails the run."
   cycles_back:
     name: Billing Cycles Back
     description: "How many recent meter-read cycles to import each run. The billing-history table shows at most 24, so anything higher just imports everything available."
