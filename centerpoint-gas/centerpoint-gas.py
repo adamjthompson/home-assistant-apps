@@ -525,6 +525,21 @@ async def _login_with_2fa(page):
     # much more robust signal that the page itself is actually usable.
     await page.wait_for_load_state("load")
 
+    # Confirmed via a live run: the "Multi-factor Authentication" text can
+    # match mid-navigation (the page was still being replaced), and the very
+    # next locator call then died with "Execution context was destroyed".
+    # Wait for the method-choice controls to actually be attached (or for a
+    # redirect off the login domain) before touching the page.
+    try:
+        await page.wait_for_function(
+            "() => !location.host.includes('login.centerpointenergy.com') || "
+            "document.querySelector('#custom_email, #mfaMethod_email, #verificationCode')",
+            timeout=30_000,
+        )
+    except Exception:
+        log.warning("MFA controls never appeared after 30s -- proceeding anyway")
+    await page.wait_for_load_state("load")
+
     if "login.centerpointenergy.com" not in page.url:
         log.info("No 2FA challenge -- device appears to be remembered")
         return
@@ -558,26 +573,33 @@ async def _login_with_2fa(page):
     # its own controlled input) rather than a logic bug -- retries with
     # verification instead of assuming a single attempt always sticks.
     for attempt in range(1, 4):
-        custom_email = page.locator("#custom_email")
-        if await custom_email.count() > 0:
-            try:
-                await custom_email.first.click()
-            except Exception as e:
-                log.warning("Could not click #custom_email (attempt %d): %s", attempt, e)
-        else:
-            log.warning("#custom_email not found on the MFA method-choice page")
+        try:
+            custom_email = page.locator("#custom_email")
+            if await custom_email.count() > 0:
+                try:
+                    await custom_email.first.click()
+                except Exception as e:
+                    log.warning("Could not click #custom_email (attempt %d): %s", attempt, e)
+            else:
+                log.warning("#custom_email not found on the MFA method-choice page")
 
-        mfa_email = page.locator("#mfaMethod_email")
-        if await mfa_email.count() > 0:
-            try:
-                await mfa_email.first.check(force=True)
-            except Exception as e:
-                log.warning("Could not force-check #mfaMethod_email (attempt %d): %s", attempt, e)
-        else:
-            log.warning("#mfaMethod_email not found on the MFA method-choice page")
+            mfa_email = page.locator("#mfaMethod_email")
+            if await mfa_email.count() > 0:
+                try:
+                    await mfa_email.first.check(force=True)
+                except Exception as e:
+                    log.warning("Could not force-check #mfaMethod_email (attempt %d): %s", attempt, e)
+            else:
+                log.warning("#mfaMethod_email not found on the MFA method-choice page")
 
-        custom_checked = await custom_email.is_checked() if await custom_email.count() > 0 else False
-        mfa_checked = await mfa_email.is_checked() if await mfa_email.count() > 0 else False
+            custom_checked = await custom_email.is_checked() if await custom_email.count() > 0 else False
+            mfa_checked = await mfa_email.is_checked() if await mfa_email.count() > 0 else False
+        except Exception as e:
+            # A late navigation can still destroy the execution context
+            # mid-attempt; let the page settle and retry rather than failing.
+            log.warning("Email selection attempt %d interrupted: %s", attempt, e)
+            await page.wait_for_load_state("load")
+            continue
         log.info(
             "Post-selection checked state (attempt %d) -- custom_email: %s, "
             "mfaMethod_email: %s",
