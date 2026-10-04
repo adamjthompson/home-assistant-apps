@@ -835,6 +835,27 @@ async def scrape_billing_history(page):
 
 
 async def scrape_gas_usage():
+    # Confirmed via live runs: a stale saved session can leave the account
+    # site's MSAL state stuck, so every successful login just bounces back to
+    # a fresh sign-in page. If a run with a saved session fails, discard the
+    # session and retry once from a clean browser.
+    if not os.path.exists(SESSION_STATE_PATH):
+        return await _scrape_gas_usage_once()
+    try:
+        return await _scrape_gas_usage_once()
+    except Exception:
+        log.warning(
+            "Run with saved session failed -- deleting %s and retrying once "
+            "with a clean browser session", SESSION_STATE_PATH,
+        )
+        try:
+            os.remove(SESSION_STATE_PATH)
+        except FileNotFoundError:
+            pass
+        return await _scrape_gas_usage_once()
+
+
+async def _scrape_gas_usage_once():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             executable_path=CHROMIUM_PATH,
