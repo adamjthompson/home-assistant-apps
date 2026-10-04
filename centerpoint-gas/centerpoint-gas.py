@@ -879,19 +879,13 @@ async def _scrape_gas_usage_once():
         # straight back to a fresh sign-in page, even from a clean session.
         # B2C reports failures back to the redirect URI as #error=... in the
         # fragment, which the account site then silently restarts from --
-        # log every main-frame navigation (fragment included) and any page
-        # errors so that reason is visible.
+        # log every main-frame navigation (fragment included) so that
+        # reason is visible.
         page.on(
             "framenavigated",
             lambda frame: frame == page.main_frame
             and log.info("Navigated: %s", frame.url[:600]),
         )
-        page.on(
-            "console",
-            lambda msg: msg.type in ("error", "warning")
-            and log.info("Browser console %s: %s", msg.type, msg.text[:500]),
-        )
-        page.on("pageerror", lambda err: log.info("Browser page error: %s", err))
 
         try:
             log.info("Navigating to account home")
