@@ -711,8 +711,9 @@ async def _login_with_2fa(page):
                 "Still on the login domain 30s after submitting the "
                 "verification code -- likely an invalid/expired code (the "
                 "page text below should say so directly if that's the "
-                "case), or the submission didn't register. Page text: %r",
-                body_snippet,
+                "case), or the submission didn't register. URL: %s -- "
+                "Page text: %r",
+                page.url, body_snippet,
             )
             raise RuntimeError(
                 "Verification-code submission did not leave the login "
