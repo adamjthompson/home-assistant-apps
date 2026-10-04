@@ -537,7 +537,20 @@ async def _login_with_2fa(page):
             timeout=30_000,
         )
     except Exception:
-        log.warning("MFA controls never appeared after 30s -- proceeding anyway")
+        body_snippet = await _safe_body_text(page)
+        all_inputs = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('input, button')).map("
+            "i => ({tag: i.tagName, name: i.name, id: i.id, type: i.type}))"
+        )
+        log.error(
+            "MFA controls never appeared 30s after the credentials submit. "
+            "URL: %s -- Page text: %r", page.url, body_snippet,
+        )
+        log.error("All input/button elements found: %r", all_inputs)
+        raise RuntimeError(
+            "Unrecognized page after the credentials submit -- see logged "
+            "URL/page text above"
+        )
     await page.wait_for_load_state("load")
 
     if "login.centerpointenergy.com" not in page.url:
