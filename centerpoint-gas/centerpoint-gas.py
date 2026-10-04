@@ -864,6 +864,16 @@ async def _scrape_gas_usage_once():
         )
         storage_state = SESSION_STATE_PATH if os.path.exists(SESSION_STATE_PATH) else None
         context = await browser.new_context(storage_state=storage_state)
+        # Confirmed via a live run's navigation log: the account site now
+        # ships the disable-devtool library, which logged "You don't have
+        # permission to use DEVTOOL!【type = 6】" and then immediately
+        # redirected to B2C logout -- right after a successful login had
+        # already returned an auth code. Type 6 is its performance detector:
+        # it times console.table vs console.log on a large array, and
+        # Playwright's CDP console subscription makes console.table slow
+        # enough to trip it. Making console.table a no-op before any page
+        # script runs keeps that timing ratio from ever triggering.
+        await context.add_init_script("console.table = function () {};")
         page = await context.new_page()
         # Diagnostic: live runs showed a successful-looking login bouncing
         # straight back to a fresh sign-in page, even from a clean session.
