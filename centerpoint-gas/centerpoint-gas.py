@@ -865,6 +865,23 @@ async def _scrape_gas_usage_once():
         storage_state = SESSION_STATE_PATH if os.path.exists(SESSION_STATE_PATH) else None
         context = await browser.new_context(storage_state=storage_state)
         page = await context.new_page()
+        # Diagnostic: live runs showed a successful-looking login bouncing
+        # straight back to a fresh sign-in page, even from a clean session.
+        # B2C reports failures back to the redirect URI as #error=... in the
+        # fragment, which the account site then silently restarts from --
+        # log every main-frame navigation (fragment included) and any page
+        # errors so that reason is visible.
+        page.on(
+            "framenavigated",
+            lambda frame: frame == page.main_frame
+            and log.info("Navigated: %s", frame.url[:600]),
+        )
+        page.on(
+            "console",
+            lambda msg: msg.type in ("error", "warning")
+            and log.info("Browser console %s: %s", msg.type, msg.text[:500]),
+        )
+        page.on("pageerror", lambda err: log.info("Browser page error: %s", err))
 
         try:
             log.info("Navigating to account home")
